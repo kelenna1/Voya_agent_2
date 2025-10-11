@@ -1,0 +1,46 @@
+# Production requirements for Voya Agent
+# Core Django and API
+Django==5.2.6
+djangorestframework==3.16.1
+django-cors-headers==4.9.0
+django-environ==0.12.0
+django-extensions==4.1
+
+# Database
+dj-database-url==3.0.1
+psycopg2-binary==2.9.10
+
+# Static files and hosting
+whitenoise==6.11.0
+gunicorn==23.0.0
+
+# AI and LangChain
+langchain==0.2.10
+langchain-openai==0.1.17
+langchain-core==0.2.43
+
+# HTTP requests and utilities
+requests==2.32.5
+python-dotenv==1.1.1
+python-decouple==3.8
+
+# Testing and development
+pytest==8.4.2
+pytest-django==4.11.1
+
+# Image processing
+pillow==11.3.0
+
+# Security and validation
+PyJWT==2.10.1
+djangorestframework_simplejwt==5.5.1
+
+# Utilities
+Pygments==2.19.2
+certifi==2025.8.3
+charset-normalizer==3.4.3
+idna==3.10
+urllib3==2.5.0
+sqlparse==0.5.3
+tzdata==2025.2
+asgiref==3.9.2

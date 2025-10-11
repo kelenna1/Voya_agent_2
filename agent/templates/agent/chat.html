@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voya Agent Chat</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .chat-container {
+            width: 100%;
+            max-width: 900px;
+            height: 90vh;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: linear-gradient(to right, #4a6ee0, #6a4ee0);
+            color: white;
+            padding: 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .chat-header i {
+            font-size: 24px;
+        }
+
+        .chat-header h2 {
+            font-weight: 600;
+            font-size: 1.5rem;
+        }
+
+        .chat-status {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.9rem;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #4ade80;
+        }
+
+        .messages-container {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 20px;
+            display: flex;
+            align-items: flex-start;
+            max-width: 95%;
+        }
+
+        .user-message {
+            margin-left: auto;
+            flex-direction: row-reverse;
+            max-width: 70%;
+        }
+
+        .message-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 10px;
+            flex-shrink: 0;
+        }
+
+        .user-message .message-avatar {
+            background: linear-gradient(to right, #4a6ee0, #6a4ee0);
+            color: white;
+        }
+
+        .agent-message .message-avatar {
+            background: linear-gradient(to right, #f093fb, #f5576c);
+            color: white;
+        }
+
+        .message-content {
+            flex: 1;
+        }
+
+        .message-bubble {
+            padding: 12px 18px;
+            border-radius: 18px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+            position: relative;
+            line-height: 1.5;
+        }
+
+        .user-message .message-bubble {
+            background: linear-gradient(to right, #4a6ee0, #6a4ee0);
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+
+        .agent-message .message-bubble {
+            background: white;
+            color: #333;
+            border-bottom-left-radius: 5px;
+            border: 1px solid #eaeaea;
+        }
+
+        .message-time {
+            font-size: 0.7rem;
+            margin-top: 5px;
+            opacity: 0.7;
+            text-align: right;
+        }
+
+        .agent-message .message-time {
+            text-align: left;
+        }
+
+        /* Tour Cards Styling */
+        .tour-cards-container {
+            margin-top: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .tour-card {
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e5e7eb;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .tour-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+            transform: translateY(-2px);
+        }
+
+        .tour-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+            gap: 12px;
+        }
+
+        .tour-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #1f2937;
+            line-height: 1.4;
+            flex: 1;
+        }
+
+        .tour-price {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #4a6ee0;
+            white-space: nowrap;
+        }
+
+        .tour-details {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-top: 10px;
+        }
+
+        .tour-detail-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.85rem;
+            color: #6b7280;
+        }
+
+        .tour-detail-item i {
+            color: #9ca3af;
+            font-size: 0.9rem;
+        }
+
+        .tour-rating {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .tour-rating i {
+            color: #fbbf24;
+        }
+
+        .tour-duration {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .tour-card-footer {
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid #f3f4f6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .view-details-btn {
+            background: linear-gradient(to right, #4a6ee0, #6a4ee0);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.3s;
+        }
+
+        .view-details-btn:hover {
+            transform: translateX(3px);
+            box-shadow: 0 2px 8px rgba(74, 110, 224, 0.3);
+        }
+
+        .tour-code {
+            font-size: 0.75rem;
+            color: #9ca3af;
+            font-family: 'Courier New', monospace;
+        }
+
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            max-width: 80%;
+        }
+
+        .typing-bubble {
+            background: white;
+            padding: 12px 18px;
+            border-radius: 18px;
+            border-bottom-left-radius: 5px;
+            border: 1px solid #eaeaea;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #b3b3b3;
+            animation: typingAnimation 1.4s infinite ease-in-out;
+        }
+
+        .typing-dot:nth-child(1) {
+            animation-delay: 0s;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typingAnimation {
+            0%, 60%, 100% {
+                transform: translateY(0);
+            }
+            30% {
+                transform: translateY(-5px);
+            }
+        }
+
+        .input-area {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #eaeaea;
+            display: flex;
+            gap: 10px;
+        }
+
+        .input-area input {
+            flex: 1;
+            padding: 12px 18px;
+            border: 1px solid #ddd;
+            border-radius: 25px;
+            outline: none;
+            font-size: 1rem;
+            transition: all 0.3s;
+        }
+
+        .input-area input:focus {
+            border-color: #4a6ee0;
+            box-shadow: 0 0 0 2px rgba(74, 110, 224, 0.2);
+        }
+
+        .send-button {
+            background: linear-gradient(to right, #4a6ee0, #6a4ee0);
+            color: white;
+            border: none;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 10px rgba(74, 110, 224, 0.3);
+        }
+
+        .send-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(74, 110, 224, 0.4);
+        }
+
+        .send-button:active {
+            transform: translateY(0);
+        }
+
+        .send-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .messages-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .messages-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+
+        .messages-container::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 10px;
+        }
+
+        .messages-container::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+
+        @media (max-width: 768px) {
+            .chat-container {
+                height: 95vh;
+                border-radius: 15px;
+                max-width: 100%;
+            }
+            
+            .message {
+                max-width: 100%;
+            }
+
+            .user-message {
+                max-width: 85%;
+            }
+            
+            .message-avatar {
+                width: 35px;
+                height: 35px;
+            }
+
+            .tour-card-header {
+                flex-direction: column;
+            }
+
+            .tour-details {
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <i class="fas fa-robot"></i>
+            <h2>Voya Agent Chat</h2>
+            <div class="chat-status">
+                <div class="status-indicator"></div>
+                <span>Online</span>
+            </div>
+        </div>
+        
+        <div class="messages-container" id="messages">
+            <div class="message agent-message">
+                <div class="message-avatar">
+                    <i class="fas fa-robot"></i>
+                </div>
+                <div class="message-content">
+                    <div class="message-bubble">
+                        Hello! I'm Avoya, your AI assistant. How can I help you today?
+                        <div class="message-time">Just now</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="input-area">
+            <input type="text" id="user-input" placeholder="Type your message...">
+            <button class="send-button" id="send-button" onclick="sendMessage()">
+                <i class="fas fa-paper-plane"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        let isWaitingForResponse = false;
+
+        function parseResponse(text) {
+            // Try to detect if the response contains structured tour data
+            const tourPattern = /\d+\.\s*\*\*(.*?)\*\*[\s\S]*?Price:\*\*\s*\$([\d.]+)[\s\S]*?Rating:\*\*\s*([\d.]+)\s*\(([\d]+)\s*reviews?\)[\s\S]*?Duration:\*\*\s*(.*?)[\s\S]*?\[More Details & Booking\]\((.*?)\)/gi;
+            
+            const tours = [];
+            let match;
+            
+            while ((match = tourPattern.exec(text)) !== null) {
+                tours.push({
+                    title: match[1].trim(),
+                    price: parseFloat(match[2]),
+                    rating: parseFloat(match[3]),
+                    reviewCount: parseInt(match[4]),
+                    duration: match[5].trim(),
+                    url: match[6].trim()
+                });
+            }
+            
+            if (tours.length > 0) {
+                // Extract intro text (everything before the first numbered item)
+                const introMatch = text.match(/^(.*?)(?=\d+\.\s*\*\*)/s);
+                const intro = introMatch ? introMatch[1].trim() : '';
+                
+                return {
+                    type: 'tours',
+                    intro: intro,
+                    tours: tours
+                };
+            }
+            
+            return {
+                type: 'text',
+                content: text
+            };
+        }
+
+        function createTourCards(tours, intro) {
+            let html = '';
+            
+            if (intro) {
+                html += `<div class="message-bubble">${intro}<div class="message-time">${getCurrentTime()}</div></div>`;
+            }
+            
+            html += '<div class="tour-cards-container">';
+            
+            tours.forEach((tour, index) => {
+                html += `
+                    <div class="tour-card">
+                        <div class="tour-card-header">
+                            <div class="tour-title">${tour.title}</div>
+                            <div class="tour-price">$${tour.price.toFixed(2)}</div>
+                        </div>
+                        <div class="tour-details">
+                            <div class="tour-detail-item tour-rating">
+                                <i class="fas fa-star"></i>
+                                <span><strong>${tour.rating}</strong> (${tour.reviewCount} reviews)</span>
+                            </div>
+                            ${tour.duration !== 'N/A' ? `
+                            <div class="tour-detail-item tour-duration">
+                                <i class="far fa-clock"></i>
+                                <span>${tour.duration}</span>
+                            </div>
+                            ` : ''}
+                        </div>
+                        <div class="tour-card-footer">
+                            <span class="tour-code">Tour #${index + 1}</span>
+                            <a href="${tour.url}" target="_blank" class="view-details-btn">
+                                View Details
+                                <i class="fas fa-external-link-alt"></i>
+                            </a>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            
+            return html;
+        }
+
+        async function sendMessage() {
+            if (isWaitingForResponse) return;
+            
+            const input = document.getElementById('user-input');
+            const sendButton = document.getElementById('send-button');
+            const messagesDiv = document.getElementById('messages');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            isWaitingForResponse = true;
+            input.disabled = true;
+            sendButton.disabled = true;
+
+            const userMessageHTML = `
+                <div class="message user-message">
+                    <div class="message-avatar">
+                        <i class="fas fa-user"></i>
+                    </div>
+                    <div class="message-content">
+                        <div class="message-bubble">
+                            ${message}
+                            <div class="message-time">${getCurrentTime()}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            messagesDiv.innerHTML += userMessageHTML;
+            input.value = '';
+            
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            
+            const typingIndicatorHTML = `
+                <div class="typing-indicator" id="typing-indicator">
+                    <div class="message-avatar">
+                        <i class="fas fa-robot"></i>
+                    </div>
+                    <div class="typing-bubble">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
+                </div>
+            `;
+            messagesDiv.innerHTML += typingIndicatorHTML;
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            
+            try {
+                const response = await fetch('/api/chat/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ input: message })
+                });
+                const data = await response.json();
+
+                removeTypingIndicator();
+                
+                if (data.success) {
+                    const parsed = parseResponse(data.output);
+                    
+                    let contentHTML = '';
+                    if (parsed.type === 'tours') {
+                        contentHTML = createTourCards(parsed.tours, parsed.intro);
+                    } else {
+                        contentHTML = `
+                            <div class="message-bubble">
+                                ${parsed.content}
+                                <div class="message-time">${getCurrentTime()}</div>
+                            </div>
+                        `;
+                    }
+                    
+                    messagesDiv.innerHTML += `
+                        <div class="message agent-message">
+                            <div class="message-avatar">
+                                <i class="fas fa-robot"></i>
+                            </div>
+                            <div class="message-content">
+                                ${contentHTML}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    messagesDiv.innerHTML += `
+                        <div class="message agent-message">
+                            <div class="message-avatar">
+                                <i class="fas fa-robot"></i>
+                            </div>
+                            <div class="message-content">
+                                <div class="message-bubble">
+                                    Sorry, I encountered an error: ${data.error}
+                                    <div class="message-time">${getCurrentTime()}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                removeTypingIndicator();
+                
+                messagesDiv.innerHTML += `
+                    <div class="message agent-message">
+                        <div class="message-avatar">
+                            <i class="fas fa-robot"></i>
+                        </div>
+                        <div class="message-content">
+                            <div class="message-bubble">
+                                Sorry, there was a connection error. Please try again.
+                                <div class="message-time">${getCurrentTime()}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            isWaitingForResponse = false;
+            input.disabled = false;
+            sendButton.disabled = false;
+            input.focus();
+            
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function removeTypingIndicator() {
+            const typingIndicator = document.getElementById('typing-indicator');
+            if (typingIndicator) {
+                typingIndicator.remove();
+            }
+        }
+
+        document.getElementById('user-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !isWaitingForResponse) sendMessage();
+        });
+
+        function getCurrentTime() {
+            const now = new Date();
+            return `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+        }
+    </script>
+</body>
+</html>
