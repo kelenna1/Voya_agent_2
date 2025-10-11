@@ -29,7 +29,7 @@ SECRET_KEY = 'django-insecure-wcpl7rs$=uz&f!6n824__&8=fdnz9ng@a94ai1mwnrin2i+2i+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["voya-agent-j9zu.onrender.com", "http://127.0.0.1:8000"]
 
 
 # Application definition
@@ -152,6 +152,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
+    "voya-agent-j9zu.onrender.com"
 ]
 
 CORS_ALLOW_CREDENTIALS = True
