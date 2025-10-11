@@ -6,14 +6,23 @@ class Conversation(models.Model):
     """Model to store chat conversations"""
     user = models.ForeignKey(User, on_delete=models.CASCADE, null=True, blank=True)
     session_id = models.CharField(max_length=255, unique=True, help_text="Unique session identifier")
+    title = models.CharField(max_length=200, blank=True, help_text="Auto-generated conversation title")
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
-        ordering = ['-created_at']
+        ordering = ['-updated_at']
     
     def __str__(self):
-        return f"Conversation {self.session_id}"
+        return self.title or f"Conversation {self.session_id[:8]}"
+    
+    def get_message_count(self):
+        """Get the number of messages in this conversation"""
+        return self.messages.count()
+    
+    def get_last_message(self):
+        """Get the last message in this conversation"""
+        return self.messages.order_by('-timestamp').first()
 
 class Message(models.Model):
     """Model to store individual messages in conversations"""

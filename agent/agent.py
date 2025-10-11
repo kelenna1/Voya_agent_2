@@ -7,6 +7,7 @@ from langchain.memory import ConversationBufferWindowMemory
 import os
 from dotenv import load_dotenv
 from agent.services.viator import ViatorService
+from agent.services.memory import DjangoConversationMemory
 from datetime import datetime, timedelta
 
 # Load environment variables
@@ -166,13 +167,25 @@ Be friendly, enthusiastic, and helpful. Make travel planning feel easy and excit
     ("human", "{input}"),
     ("placeholder", "{agent_scratchpad}"),
 ])
-# Add memory (cleared to remove old context that might contain 2023 dates)
-memory = ConversationBufferWindowMemory(memory_key="chat_history", return_messages=True, k=20)
-
-# Create agent and executor
+# Create agent and executor (memory will be set per session)
 tools = [search_viator_tours, check_viator_availability, get_destination_info]
 agent = create_tool_calling_agent(llm, tools, prompt)
-executor = AgentExecutor(agent=agent, tools=tools, verbose=True, memory=memory)
+
+# Default executor without memory (memory will be added per session)
+default_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+
+def create_executor_with_memory(session_id: str = None) -> AgentExecutor:
+    """Create an executor with Django-based memory for a specific session."""
+    if session_id:
+        memory = DjangoConversationMemory(session_id=session_id, max_history_length=20)
+        return AgentExecutor(agent=agent, tools=tools, verbose=True, memory=memory)
+    else:
+        # Fallback to default memory for backward compatibility
+        memory = ConversationBufferWindowMemory(memory_key="chat_history", return_messages=True, k=20)
+        return AgentExecutor(agent=agent, tools=tools, verbose=True, memory=memory)
+
+# Keep the default executor for backward compatibility
+executor = default_executor
 
 # Test the agent with conversation
 if __name__ == "__main__":
