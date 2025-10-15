@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 # Load environment variables
 load_dotenv()
 
-# Initialize LLM
+# Initialize LLM  
 llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
 
 # Initialize ViatorService
