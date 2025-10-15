@@ -1,0 +1,387 @@
+openapi: 3.0.0
+info:
+  name: Voya Agent API
+  description: Complete API collection for Voya Agent - AI Travel Assistant
+  version: 1.0.0
+  schema: https://schema.getpostman.com/json/collection/v2.1.0/collection.json
+
+variable:
+  - key: base_url
+    value: https://voya-agent-j9zu.onrender.com
+    type: string
+    description: Base URL for the deployed Voya Agent API
+
+item:
+  # Chat Endpoints
+  - name: Chat Interface
+    item:
+      - name: Chat Interface (GET)
+        request:
+          method: GET
+          header: []
+          url:
+            raw: "{{base_url}}/api/chat/"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "chat"
+              - ""
+          description: "Serves the HTML chat interface"
+        response: []
+
+      - name: Send Chat Message
+        request:
+          method: POST
+          header:
+            - key: Content-Type
+              value: application/json
+            - key: Accept
+              value: application/json
+          body:
+            mode: raw
+            raw: |
+              {
+                "input": "Find me food tours in Rome for next weekend",
+                "session_id": "optional-session-id"
+              }
+          url:
+            raw: "{{base_url}}/api/chat/"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "chat"
+              - ""
+          description: "Send a message to the AI agent and get a response"
+        response: []
+
+  # Conversation Management
+  - name: Conversations
+    item:
+      - name: List Conversations
+        request:
+          method: GET
+          header: []
+          url:
+            raw: "{{base_url}}/api/conversations/?limit=20"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "conversations"
+              - ""
+            query:
+              - key: session_id
+                value: ""
+                description: "Optional session ID to filter conversations"
+              - key: limit
+                value: "20"
+                description: "Maximum number of conversations to return"
+          description: "Get a list of all conversations with optional filtering"
+        response: []
+
+      - name: Create New Conversation
+        request:
+          method: POST
+          header:
+            - key: Content-Type
+              value: application/json
+          body:
+            mode: raw
+            raw: "{}"
+          url:
+            raw: "{{base_url}}/api/conversations/new/"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "conversations"
+              - "new"
+              - ""
+          description: "Create a new conversation and get a session ID"
+        response: []
+
+      - name: Search Conversations
+        request:
+          method: GET
+          header: []
+          url:
+            raw: "{{base_url}}/api/conversations/search/?query=rome&limit=10"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "conversations"
+              - "search"
+              - ""
+            query:
+              - key: query
+                value: "rome"
+                description: "Search term to find conversations"
+              - key: session_id
+                value: ""
+                description: "Optional session ID filter"
+              - key: limit
+                value: "10"
+                description: "Maximum number of results"
+          description: "Search conversations by content or session ID"
+        response: []
+
+      - name: Get Conversation Details
+        request:
+          method: GET
+          header: []
+          url:
+            raw: "{{base_url}}/api/conversations/1/"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "conversations"
+              - "1"
+              - ""
+            query:
+              - key: session_id
+                value: ""
+                description: "Alternative way to get conversation by session ID"
+          description: "Get detailed information about a specific conversation including all messages"
+        response: []
+
+      - name: Update Conversation
+        request:
+          method: PUT
+          header:
+            - key: Content-Type
+              value: application/json
+          body:
+            mode: raw
+            raw: |
+              {
+                "title": "Rome Food Tour Planning"
+              }
+          url:
+            raw: "{{base_url}}/api/conversations/1/update/"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "conversations"
+              - "1"
+              - "update"
+              - ""
+          description: "Update conversation title or other metadata"
+        response: []
+
+      - name: Delete Conversation
+        request:
+          method: DELETE
+          header: []
+          url:
+            raw: "{{base_url}}/api/conversations/1/delete/"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "conversations"
+              - "1"
+              - "delete"
+              - ""
+          description: "Delete a conversation and all its messages"
+        response: []
+
+  # Tour Search
+  - name: Tours
+    item:
+      - name: Search Tours
+        request:
+          method: POST
+          header:
+            - key: Content-Type
+              value: application/json
+            - key: Accept
+              value: application/json
+          body:
+            mode: raw
+            raw: |
+              {
+                "query": "food tour",
+                "destination": "Rome",
+                "date": "2024-02-15",
+                "limit": 5
+              }
+          url:
+            raw: "{{base_url}}/api/tours/search/"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "tours"
+              - "search"
+              - ""
+          description: "Search for tours using the Viator API with specific criteria"
+        response: []
+
+  # System
+  - name: System
+    item:
+      - name: Health Check
+        request:
+          method: GET
+          header: []
+          url:
+            raw: "{{base_url}}/api/health/"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "health"
+              - ""
+          description: "Check if the API is running and healthy"
+        response: []
+
+      - name: Django Admin
+        request:
+          method: GET
+          header: []
+          url:
+            raw: "{{base_url}}/admin/"
+            host:
+              - "{{base_url}}"
+            path:
+              - "admin"
+              - ""
+          description: "Access Django admin interface"
+        response: []
+
+# Example requests for common use cases
+  - name: Example Requests
+    item:
+      - name: Plan Rome Food Itinerary
+        request:
+          method: POST
+          header:
+            - key: Content-Type
+              value: application/json
+          body:
+            mode: raw
+            raw: |
+              {
+                "input": "I'm visiting Rome for 3 days and want to focus on food experiences. Can you help me plan an itinerary with food tours and cooking classes?",
+                "session_id": ""
+              }
+          url:
+            raw: "{{base_url}}/api/chat/"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "chat"
+              - ""
+          description: "Example request to plan a food-focused Rome itinerary"
+        response: []
+
+      - name: Find Walking Tours in Paris
+        request:
+          method: POST
+          header:
+            - key: Content-Type
+              value: application/json
+          body:
+            mode: raw
+            raw: |
+              {
+                "input": "Find me walking tours in Paris for next weekend",
+                "session_id": ""
+              }
+          url:
+            raw: "{{base_url}}/api/chat/"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "chat"
+              - ""
+          description: "Example request to find walking tours in Paris"
+        response: []
+
+      - name: Search London Activities
+        request:
+          method: POST
+          header:
+            - key: Content-Type
+              value: application/json
+          body:
+            mode: raw
+            raw: |
+              {
+                "query": "museum tour",
+                "destination": "London",
+                "date": "2024-02-20",
+                "limit": 3
+              }
+          url:
+            raw: "{{base_url}}/api/tours/search/"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "tours"
+              - "search"
+              - ""
+          description: "Example direct tour search for London museum tours"
+        response: []
+
+      - name: Continue Conversation
+        request:
+          method: POST
+          header:
+            - key: Content-Type
+              value: application/json
+          body:
+            mode: raw
+            raw: |
+              {
+                "input": "What about afternoon activities after the food tour?",
+                "session_id": "your-session-id-here"
+              }
+          url:
+            raw: "{{base_url}}/api/chat/"
+            host:
+              - "{{base_url}}"
+            path:
+              - "api"
+              - "chat"
+              - ""
+          description: "Example of continuing a conversation using a session ID"
+        response: []
+
+# Pre-request Scripts and Tests
+event:
+  - listen: prerequest
+    script:
+      type: text/javascript
+      exec:
+        - "// Set timestamp for requests"
+        - "pm.globals.set('timestamp', new Date().toISOString());"
+
+  - listen: test
+    script:
+      type: text/javascript
+      exec:
+        - "// Basic response validation"
+        - "pm.test('Response status code is successful', function () {"
+        - "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);"
+        - "});"
+        - ""
+        - "pm.test('Response time is acceptable', function () {"
+        - "    pm.expect(pm.response.responseTime).to.be.below(5000);"
+        - "});"
+        - ""
+        - "// For chat endpoints, check for success field"
+        - "if (pm.request.url.path.includes('chat')) {"
+        - "    pm.test('Chat response has success field', function () {"
+        - "        const jsonData = pm.response.json();"
+        - "        pm.expect(jsonData).to.have.property('success');"
+        - "    });"
+        - "}"
