@@ -28,11 +28,13 @@ class DjangoConversationMemory(BaseMemory):
         """Load conversation history from database for the current session."""
         if not self.session_id:
             return {self.memory_key: []}
-        
+
         try:
             conversation = Conversation.objects.get(session_id=self.session_id)
-            messages = conversation.messages.all().order_by('timestamp')[-self.max_history_length:]
-            
+            # Fetch most recent messages safely
+            messages = conversation.messages.all().order_by('-timestamp')[:self.max_history_length]
+            messages = list(messages)[::-1]  # Reverse to chronological order
+
             # Convert Django messages to LangChain messages
             langchain_messages = []
             for message in messages:
@@ -40,11 +42,12 @@ class DjangoConversationMemory(BaseMemory):
                     langchain_messages.append(HumanMessage(content=message.content))
                 elif message.message_type == 'assistant':
                     langchain_messages.append(AIMessage(content=message.content))
-            
+
             return {self.memory_key: langchain_messages}
-            
+
         except Conversation.DoesNotExist:
             return {self.memory_key: []}
+
     
     def save_context(self, inputs: Dict[str, Any], outputs: Dict[str, str]) -> None:
         """Save the conversation context to the database."""
