@@ -1,4 +1,3 @@
-openapi: 3.0.0
 info:
   name: Voya Agent API
   description: Complete API collection for Voya Agent - AI Travel Assistant
