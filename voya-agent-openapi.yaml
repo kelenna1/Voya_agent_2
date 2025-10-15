@@ -1,0 +1,258 @@
+openapi: 3.0.0
+info:
+  title: Voya Agent API
+  version: 1.0.0
+  description: >
+    Complete API specification for **Voya Agent**, an AI-powered travel assistant
+    that helps users plan trips, find tours, and manage conversations with a chat interface.
+
+servers:
+  - url: https://voya-agent-j9zu.onrender.com
+
+paths:
+  /api/chat/:
+    get:
+      summary: Get Chat Interface
+      description: Serves the HTML chat interface.
+      responses:
+        "200":
+          description: Chat HTML page returned.
+    post:
+      summary: Send Chat Message
+      description: Send a message to the AI travel assistant and receive a response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: string
+                  example: Find me food tours in Rome for next weekend
+                session_id:
+                  type: string
+                  example: optional-session-id
+      responses:
+        "200":
+          description: Successful AI response.
+
+  /api/conversations/:
+    get:
+      summary: List Conversations
+      description: Retrieve a list of all conversations with optional filters.
+      parameters:
+        - name: session_id
+          in: query
+          schema: { type: string }
+          description: Optional session ID filter
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+          description: Maximum number of conversations to return
+      responses:
+        "200":
+          description: List of conversations.
+
+  /api/conversations/new/:
+    post:
+      summary: Create New Conversation
+      description: Create a new conversation and get a session ID.
+      requestBody:
+        required: false
+      responses:
+        "201":
+          description: Conversation created successfully.
+
+  /api/conversations/search/:
+    get:
+      summary: Search Conversations
+      description: Search conversations by keyword or session ID.
+      parameters:
+        - name: query
+          in: query
+          required: true
+          schema: { type: string }
+          example: rome
+        - name: session_id
+          in: query
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10 }
+      responses:
+        "200":
+          description: Matching conversations returned.
+
+  /api/conversations/{conversation_id}/:
+    get:
+      summary: Get Conversation Details
+      description: Get all messages and metadata for a specific conversation.
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: session_id
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: Conversation details.
+
+  /api/conversations/{conversation_id}/update/:
+    put:
+      summary: Update Conversation
+      description: Update the conversation title or metadata.
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                  example: Rome Food Tour Planning
+      responses:
+        "200":
+          description: Conversation updated successfully.
+
+  /api/conversations/{conversation_id}/delete/:
+    delete:
+      summary: Delete Conversation
+      description: Delete a conversation and all its messages.
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "204":
+          description: Conversation deleted.
+
+  /api/tours/search/:
+    post:
+      summary: Search Tours
+      description: Search for tours using Viator or similar APIs with filters.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query: { type: string, example: food tour }
+                destination: { type: string, example: Rome }
+                date: { type: string, format: date, example: 2024-02-15 }
+                limit: { type: integer, example: 5 }
+      responses:
+        "200":
+          description: List of matching tours.
+
+  /api/health/:
+    get:
+      summary: Health Check
+      description: Check if the API server is healthy.
+      responses:
+        "200":
+          description: API is running and healthy.
+
+  /admin/:
+    get:
+      summary: Django Admin
+      description: Access Django admin panel.
+      responses:
+        "200":
+          description: Admin page loaded.
+
+  /examples/plan-rome-itinerary/:
+    post:
+      summary: Example - Plan Rome Food Itinerary
+      description: Example of sending a travel planning request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: string
+                  example: I'm visiting Rome for 3 days and want to focus on food tours and cooking classes.
+                session_id:
+                  type: string
+                  example: ""
+      responses:
+        "200":
+          description: AI travel plan generated.
+
+  /examples/find-paris-walking-tours/:
+    post:
+      summary: Example - Find Walking Tours in Paris
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: string
+                  example: Find me walking tours in Paris for next weekend
+      responses:
+        "200":
+          description: Tour list returned.
+
+  /examples/search-london-activities/:
+    post:
+      summary: Example - Search London Activities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query: { type: string, example: museum tour }
+                destination: { type: string, example: London }
+                date: { type: string, format: date, example: 2024-02-20 }
+                limit: { type: integer, example: 3 }
+      responses:
+        "200":
+          description: Tour list returned.
+
+  /examples/continue-conversation/:
+    post:
+      summary: Example - Continue Conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: string
+                  example: What about afternoon activities after the food tour?
+                session_id:
+                  type: string
+                  example: your-session-id-here
+      responses:
+        "200":
+          description: Conversation continued successfully.
+
+components:
+  schemas:
+    ChatRequest:
+      type: object
+      properties:
+        input:
+          type: string
+        session_id:
+          type: string

@@ -18,11 +18,7 @@ import uuid
 import json
 
 class ChatView(APIView):
-    """Main chat interface - serves HTML page for GET, handles chat for POST"""
-    
-    def get(self, request, *args, **kwargs):
-        """Serve the chat HTML interface"""
-        return render(request, 'agent/chat.html', {'messages': []})
+    """Main chat API, handles chat for POST"""
     
     def post(self, request, *args, **kwargs):
         """Handle chat messages with proper serialization and database storage"""
@@ -60,14 +56,31 @@ class ChatView(APIView):
             result = session_executor.invoke({"input": user_input})
             ai_response = result.get("output", "Sorry, I couldn't process that.")
             
-            # Save AI response
+            # Clean non-serializable objects from result
+            def safe_json(value):
+                try:
+                    json.dumps(value)
+                    return value
+                except TypeError:
+                    if isinstance(value, dict):
+                        return {k: safe_json(v) for k, v in value.items()}
+                    elif isinstance(value, list):
+                        return [safe_json(v) for v in value]
+                    elif hasattr(value, "content"):
+                        return str(value.content)
+                    else:
+                        return str(value)
+
+            clean_result = safe_json(result)
+
             assistant_message = Message.objects.create(
                 conversation=conversation,
                 message_type='assistant',
                 content=ai_response,
                 timestamp=timezone.now(),
-                metadata={'agent_result': result}
+                metadata={'agent_result': clean_result}
             )
+
             
             # Return structured response
             response_serializer = ChatResponseSerializer(data={
