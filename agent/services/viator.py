@@ -70,14 +70,26 @@ class ViatorService:
                 json=json,
                 timeout=30
             )
-            response.raise_for_status()
+            
+            # Check for errors before raising
+            if not response.ok:
+                # Debug output (uncomment for troubleshooting)
+                # print(f"DEBUG: Response status: {response.status_code}")
+                # print(f"DEBUG: Response headers: {dict(response.headers)}")
+                # print(f"DEBUG: Response content: {response.text}")
+                raise ViatorAPIError(response.status_code, response.text)
+            
             return response.json()
 
         except requests.exceptions.Timeout:
             raise ViatorAPIError(408, f"Request timeout for endpoint '{endpoint}'")
+        except ViatorAPIError:
+            # Re-raise our custom errors
+            raise
         except requests.exceptions.RequestException as e:
             status = e.response.status_code if e.response else 0
             message = e.response.text if e.response else str(e)
+            # Debug output (uncomment for troubleshooting)
             # print(f"DEBUG: Request failed - URL: {url}, Status: {status}, Message: {message}")
             raise ViatorAPIError(status, message)
 
@@ -154,23 +166,46 @@ class ViatorService:
 
         
         payload = {
-            "searchTerm": query or "",        
-            "destId": dest_id,           
-            "startDate": start_date,
-            "endDate": end_date,
-            "topX": f"1-{page_size}",     
+            "filtering": {
+                "destination": str(dest_id),
+                "startDate": start_date,
+                "endDate": end_date,
+                "highestPrice": 10000,
+                "durationInMinutes": {
+                    "from": 0,
+                    "to": 1000
+                },
+                "rating": {
+                    "from": 0,
+                    "to": 5
+                }
+            },
+            "productSorting": {
+                "sort": "PRICE",
+                "order": "ASCENDING"
+            },
+            "searchTypes": [
+                {
+                    "searchType": "PRODUCTS",
+                    "pagination": {
+                        "start": 1,
+                        "count": page_size
+                    }
+                }
+            ],
             "currency": "USD"
         }
         
 
+        # Debug output (uncomment for troubleshooting)
         # print(f"DEBUG: Making request to {endpoint} with payload: {payload}")
-        print(f"\n{'='*60}")
-        print(f"DEBUG: Destination '{destination}' resolved to ID: {dest_id} (type: {type(dest_id)})")
-        print(f"DEBUG: Start date: {start_date}")
-        print(f"DEBUG: End date: {end_date}")
-        print(f"DEBUG: Full payload being sent to Viator:")
-        print(json.dumps(payload, indent=2))
-        print(f"{'='*60}\n")
+        # print(f"\n{'='*60}")
+        # print(f"DEBUG: Destination '{destination}' resolved to ID: {dest_id} (type: {type(dest_id)})")
+        # print(f"DEBUG: Start date: {start_date}")
+        # print(f"DEBUG: End date: {end_date}")
+        # print(f"DEBUG: Full payload being sent to Viator:")
+        # print(json.dumps(payload, indent=2))
+        # print(f"{'='*60}\n")
 
         data = self._make_request("POST", endpoint, json=payload)
         
