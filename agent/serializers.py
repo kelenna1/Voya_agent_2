@@ -56,7 +56,7 @@ class TourSearchSerializer(serializers.Serializer):
     """Serializer for tour search requests"""
     query = serializers.CharField(max_length=200, required=False, default="tour")
     destination = serializers.CharField(max_length=200, help_text="Destination city or country")
-    date = serializers.DateField(required=False, help_text="Start date for tours (YYYY-MM-DD)")
+    date = serializers.CharField(required=False, help_text="Start date for tours (YYYY-MM-DD)")
     limit = serializers.IntegerField(min_value=1, max_value=20, default=5, help_text="Number of results to return")
     
     def validate_destination(self, value):
