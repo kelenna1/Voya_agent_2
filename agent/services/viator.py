@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from typing import List, Dict, Optional
 from functools import wraps
+import json
 
 load_dotenv()
 
@@ -132,7 +133,7 @@ class ViatorService:
 
         if not match:
             raise ViatorAPIError(404, f"Destination '{name}' not found in Viator database.")
-        return str(match.get("destinationId"))
+        return int(match.get("destinationId"))
 
     # ------------------------------------------------------------------
     # TOUR SEARCH
@@ -142,32 +143,35 @@ class ViatorService:
         """Search for tours by query and destination."""
         if not start_date:
             start_date = datetime.now().strftime("%Y-%m-%d")
-        end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+        
+        # Calculate end_date from start_date (not from now!)
+        start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
+        end_date = (start_date_obj + timedelta(days=30)).strftime("%Y-%m-%d")
 
         dest_id = self.resolve_destination(destination)
 
-        # Use the products/search endpoint for both cases as it's more reliable
         endpoint = "products/search"
-        
-        # Build filtering criteria
-        filtering = {
-            "destination": dest_id,
-            "startDate": start_date,
-            "endDate": end_date
-        }
-        
-        # Add search term if provided
-        if query:
-            filtering["searchTerm"] = query
+
         
         payload = {
-            "filtering": filtering,
-            "sorting": {"sort": "TRAVELER_RATING", "order": "DESCENDING"},
-            "pagination": {"start": 0, "count": page_size},
+            "searchTerm": query or "",        
+            "destId": dest_id,           
+            "startDate": start_date,
+            "endDate": end_date,
+            "topX": f"1-{page_size}",     
             "currency": "USD"
         }
+        
 
         # print(f"DEBUG: Making request to {endpoint} with payload: {payload}")
+        print(f"\n{'='*60}")
+        print(f"DEBUG: Destination '{destination}' resolved to ID: {dest_id} (type: {type(dest_id)})")
+        print(f"DEBUG: Start date: {start_date}")
+        print(f"DEBUG: End date: {end_date}")
+        print(f"DEBUG: Full payload being sent to Viator:")
+        print(json.dumps(payload, indent=2))
+        print(f"{'='*60}\n")
+
         data = self._make_request("POST", endpoint, json=payload)
         
         if not data:
