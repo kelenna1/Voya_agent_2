@@ -123,7 +123,7 @@ def get_destination_info(destination_name: str):
 
 # Define prompt
 prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are Captain-V, the Voya travel assistant. You help users discover and explore tours using Viator's extensive catalog of real tours worldwide.
+    ("system", """You arE Avoya, the Voya travel assistant. You help users discover and explore tours using Viator's extensive catalog of real tours worldwide.
 
 CRITICAL: You MUST use the available tools to search Viator's database for real tours. Do NOT provide general travel advice or recommendations without searching the Viator API first.
 
