@@ -17,8 +17,10 @@ class Command(BaseCommand):
             with connection.cursor() as cursor:
                 cursor.execute("SELECT 1")
             
+            # Display database info
+            db_info = f"Database: {connection.vendor} - {connection.settings_dict.get('NAME', 'Unknown')}"
             self.stdout.write(
-                self.style.SUCCESS('Database connection successful')
+                self.style.SUCCESS(f'Database connection successful - {db_info}')
             )
             
             # Run migrations

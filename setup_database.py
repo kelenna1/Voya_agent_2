@@ -35,9 +35,16 @@ def setup_database():
         
         # Check if tables exist
         with connection.cursor() as cursor:
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            tables = cursor.fetchall()
-            table_names = [table[0] for table in tables]
+            # Check database type and query tables accordingly
+            if 'sqlite' in connection.vendor:
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                tables = cursor.fetchall()
+                table_names = [table[0] for table in tables]
+            else:
+                # PostgreSQL
+                cursor.execute("SELECT tablename FROM pg_tables WHERE schemaname = 'public';")
+                tables = cursor.fetchall()
+                table_names = [table[0] for table in tables]
             
             required_tables = [
                 'agent_conversation',
