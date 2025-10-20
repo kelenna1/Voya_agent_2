@@ -56,6 +56,24 @@ class ChatView(APIView):
             result = session_executor.invoke({"input": user_input})
             ai_response = result.get("output", "Sorry, I couldn't process that.")
             
+            # Check if the response contains structured tour data
+            structured_response = None
+            if "TOUR_SEARCH_RESULT:" in ai_response:
+                try:
+                    # Extract JSON from the response
+                    json_start = ai_response.find("TOUR_SEARCH_RESULT:") + len("TOUR_SEARCH_RESULT:")
+                    json_part = ai_response[json_start:].strip()
+                    structured_response = json.loads(json_part)
+                except json.JSONDecodeError:
+                    # If JSON parsing fails, use the original response
+                    structured_response = None
+            elif ai_response.strip().startswith('{') and '"tours"' in ai_response:
+                # Handle case where the agent returns JSON directly
+                try:
+                    structured_response = json.loads(ai_response)
+                except json.JSONDecodeError:
+                    structured_response = None
+            
             # Clean non-serializable objects from result
             def safe_json(value):
                 try:
@@ -81,24 +99,28 @@ class ChatView(APIView):
                 metadata={'agent_result': clean_result}
             )
 
-            
-            # Return structured response
-            response_serializer = ChatResponseSerializer(data={
-                'output': ai_response,
-                'success': True,
-                'session_id': session_id,
-                'message_id': assistant_message.id
-            })
-            
-            if response_serializer.is_valid():
-                return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
+            # Return structured response if available, otherwise return conversational response
+            if structured_response:
+                # Return the structured tour data
+                return Response(structured_response, status=status.HTTP_200_OK)
             else:
-                return Response({
-                    "output": ai_response,
-                    "success": True,
-                    "session_id": session_id,
-                    "message_id": assistant_message.id
-                }, status=status.HTTP_200_OK)
+                # Return conversational response
+                response_serializer = ChatResponseSerializer(data={
+                    'output': ai_response,
+                    'success': True,
+                    'session_id': session_id,
+                    'message_id': assistant_message.id
+                })
+                
+                if response_serializer.is_valid():
+                    return Response(response_serializer.validated_data, status=status.HTTP_200_OK)
+                else:
+                    return Response({
+                        "output": ai_response,
+                        "success": True,
+                        "session_id": session_id,
+                        "message_id": assistant_message.id
+                    }, status=status.HTTP_200_OK)
                 
         except Exception as e:
             # Check if it's a database-related error
