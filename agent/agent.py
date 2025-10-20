@@ -5,6 +5,7 @@ from langchain.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.memory import ConversationBufferWindowMemory
 import os
+import json
 from dotenv import load_dotenv
 from agent.services.viator import ViatorService
 from agent.services.memory import DjangoConversationMemory
@@ -31,32 +32,57 @@ def search_viator_tours(query: str = "tour", destination: str = "Rome", date: st
         limit: Maximum number of results to return (default 5)
     
     Returns:
-        List of tours with code, title, price, duration, rating, url, and thumbnail
+        Structured JSON response with success, message, and tours array
     """
     try:
         if not date:
+            # Use a future date (7 days from now) to avoid past dates
             date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
         
         tours = viator.search_tours(query, destination, date, limit)
         
         if not tours:
-            return {
+            result = {
                 "success": False,
-                "message": f"No tours found for '{query}' in {destination} starting {date}. The sandbox may have limited data. Try broader search terms or different destinations ",
-                "tours": []
+                "message": f"No tours found for '{query}' in {destination} starting {date}. Try broader search terms or different destinations.",
+                "tours": [],
+                "destination": {"name": destination}
             }
+            return f"TOUR_SEARCH_RESULT: {json.dumps(result)}"
         
-        return {
+        # Format tours for frontend
+        formatted_tours = []
+        for tour in tours:
+            # Create fallback URL if none provided
+            tour_url = tour.get("url", "")
+            if not tour_url and tour.get("code"):
+                tour_url = f"https://www.viator.com/tours/d{tour['code']}"
+            
+            formatted_tours.append({
+                "code": tour.get("code", ""),
+                "title": tour.get("title", ""),
+                "price": float(tour.get("price", 0)),
+                "rating": float(tour.get("rating", 0)),
+                "duration": tour.get("duration", "N/A"),
+                "url": tour_url,
+                "thumbnail": tour.get("thumbnail", "")
+            })
+        
+        result = {
             "success": True,
-            "message": f"Found {len(tours)} tours",
-            "tours": tours
+            "message": f"Found {len(formatted_tours)} tours for '{query}' in {destination} starting {date}.",
+            "tours": formatted_tours,
+            "destination": {"name": destination}
         }
+        return f"TOUR_SEARCH_RESULT: {json.dumps(result)}"
     except Exception as e:
-        return {
+        result = {
             "success": False,
             "message": f"Error searching tours: {str(e)}",
-            "tours": []
+            "tours": [],
+            "destination": {"name": destination}
         }
+        return f"TOUR_SEARCH_RESULT: {json.dumps(result)}"
 
 @tool
 def check_viator_availability(product_code: str):
@@ -137,22 +163,26 @@ Your capabilities:
 MANDATORY workflow for tour requests:
 1. ALWAYS use search_viator_tours tool when users ask about tours, destinations, or activities
 2. If you need destination info first, use get_destination_info
-3. Format your response with tour details in this EXACT format:
+3. IMPORTANT: When you receive a TOUR_SEARCH_RESULT from the tool, you MUST return the EXACT JSON structure that was provided by the tool. Do NOT format it as conversational text.
+4. If the tool returns a TOUR_SEARCH_RESULT, extract and return ONLY the JSON content without any additional formatting or conversational text.
 
-1. **Tour Name**
-**Price:** $XX.XX
-**Rating:** X.X (X reviews)  
-**Duration:** X hours
-[More Details & Booking](viator_url)
-
-2. **Tour Name**
-**Price:** $XX.XX
-**Rating:** X.X (X reviews)  
-**Duration:** X hours
-[More Details & Booking](viator_url)
-
-4. Provide 3-5 real tours from Viator API results
-5. If no tours found, explain this and suggest alternative searches
+For tour search requests, return responses in this EXACT JSON format:
+{{
+  "success": boolean,
+  "message": "Conversational response text here. Be friendly and helpful.",
+  "tours": [
+    {{
+      "code": "string",
+      "title": "string", 
+      "price": number,
+      "rating": number,
+      "duration": "string",
+      "url": "string",
+      "thumbnail": "string"
+    }}
+  ],
+  "destination": {{"name": "string"}}
+}}
 
 Important guidelines:
 - NEVER give general travel advice without searching Viator first
@@ -161,6 +191,7 @@ Important guidelines:
 - When users want to book, provide the direct Viator URL for the tour
 - You can search and recommend but cannot complete bookings (users book on Viator)
 - Use chat history to maintain context and personalize recommendations
+- For tour searches, ALWAYS return the structured JSON format, not conversational text
 
 Be friendly, enthusiastic, and helpful. Make travel planning feel easy and exciting!"""),
     ("placeholder", "{chat_history}"),
