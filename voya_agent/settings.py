@@ -169,7 +169,14 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # Database settings (can be overridden by environment variables)
 import dj_database_url
-DATABASES['default'].update(dj_database_url.config(default='sqlite:///db.sqlite3'))
+
+# Get database URL from environment, fallback to SQLite
+database_url = os.getenv('DATABASE_URL', 'sqlite:///db.sqlite3')
+DATABASES['default'] = dj_database_url.parse(database_url)
+
+# For production, ensure we're using PostgreSQL
+if os.getenv('DATABASE_URL'):
+    DATABASES['default']['CONN_MAX_AGE'] = 600
 
 # Logging configuration
 LOGGING = {

@@ -154,10 +154,20 @@ class ViatorService:
                      start_date: Optional[str] = None, page_size: int = 5) -> List[Dict]:
         """Search for tours by query and destination."""
         if not start_date:
-            start_date = datetime.now().strftime("%Y-%m-%d")
+            # Use today's date, but ensure it's not in the past
+            today = datetime.now().strftime("%Y-%m-%d")
+            start_date = today
+        
+        # Parse the start date and ensure it's not in the past
+        start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
+        today_obj = datetime.now().date()
+        
+        # If the provided start_date is in the past, use today's date instead
+        if start_date_obj.date() < today_obj:
+            start_date_obj = datetime.now()
+            start_date = start_date_obj.strftime("%Y-%m-%d")
         
         # Calculate end_date from start_date (not from now!)
-        start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
         end_date = (start_date_obj + timedelta(days=30)).strftime("%Y-%m-%d")
 
         dest_id = self.resolve_destination(destination)

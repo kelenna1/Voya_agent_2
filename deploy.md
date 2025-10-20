@@ -28,8 +28,8 @@ git add .
 git commit -m "Deploy Voya Agent"
 git push heroku main
 
-# Run migrations
-heroku run python manage.py migrate
+# Run migrations (if needed)
+heroku run python manage.py deploy
 
 # Create superuser (optional)
 heroku run python manage.py createsuperuser
@@ -104,3 +104,39 @@ The application includes:
 - Structured logging to files and console
 - Database query optimization
 - Error handling and reporting
+
+## Troubleshooting
+
+### Database Issues
+
+If you encounter "no such table" errors:
+
+1. **For Render/Heroku deployments:**
+   ```bash
+   # Run the deployment command manually
+   heroku run python manage.py deploy
+   ```
+
+2. **For local development:**
+   ```bash
+   # Run the setup script
+   python setup_database.py
+   
+   # Or run migrations manually
+   python manage.py migrate
+   ```
+
+3. **Check database connection:**
+   ```bash
+   python manage.py dbshell
+   .tables  # (for SQLite)
+   \dt      # (for PostgreSQL)
+   ```
+
+### Date Issues
+
+The Viator service now automatically prevents past dates from being used in tour searches. If you encounter date-related issues:
+
+- The system will automatically use today's date if a past date is provided
+- All dates are validated before sending to the Viator API
+- Timezone handling is improved for production deployments

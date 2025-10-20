@@ -101,8 +101,15 @@ class ChatView(APIView):
                 }, status=status.HTTP_200_OK)
                 
         except Exception as e:
+            # Check if it's a database-related error
+            error_msg = str(e)
+            if "no such table" in error_msg.lower():
+                error_msg = "Database not properly initialized. Please contact administrator."
+            elif "database is locked" in error_msg.lower():
+                error_msg = "Database is temporarily unavailable. Please try again."
+            
             return Response({
-                "error": f"An error occurred: {str(e)}",
+                "error": f"An error occurred: {error_msg}",
                 "success": False
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
