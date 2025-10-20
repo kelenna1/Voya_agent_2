@@ -170,13 +170,20 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 # Database settings (can be overridden by environment variables)
 import dj_database_url
 
-# Get database URL from environment, fallback to SQLite
-database_url = os.getenv('DATABASE_URL', 'sqlite:///db.sqlite3')
-DATABASES['default'] = dj_database_url.parse(database_url)
-
-# For production, ensure we're using PostgreSQL
-if os.getenv('DATABASE_URL'):
-    DATABASES['default']['CONN_MAX_AGE'] = 600
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'USER': os.getenv('DB_USER'),
+        'PASSWORD': os.getenv('DB_PASSWORD', 'your-default-password'),
+        'HOST': os.getenv('DB_HOST'),
+        'PORT': os.getenv('DB_PORT'),
+        'NAME': os.getenv('DBNAME'),
+        'OPTIONS': {'sslmode': 'require'},
+    }
+    
+    #, conn_max_age=600, ssl_require=True)
+    # 'default': {
+}
 
 # Logging configuration
 LOGGING = {
