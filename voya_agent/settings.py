@@ -83,12 +83,7 @@ WSGI_APPLICATION = 'voya_agent.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
-}
+
 
 
 # Password validation
@@ -170,20 +165,29 @@ STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 # Database settings (can be overridden by environment variables)
 import dj_database_url
 
+# Database settings for Supabase session pooler
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'USER': os.getenv('DB_USER'),
-        'PASSWORD': os.getenv('DB_PASSWORD', 'your-default-password'),
+        'USER': os.getenv('DB_USER', 'postgres'),
+        'PASSWORD': os.getenv('DB_PASSWORD'),
         'HOST': os.getenv('DB_HOST'),
-        'PORT': os.getenv('DB_PORT'),
-        'NAME': os.getenv('DBNAME'),
-        'OPTIONS': {'sslmode': 'require'},
+        'PORT': os.getenv('DB_PORT', '6543'),  # Session pooler uses port 6543, not 5432
+        'NAME': os.getenv('DB_NAME', 'postgres'),  # Fixed: was DBNAME
+        'OPTIONS': {
+            'sslmode': 'require',
+        },
+        'CONN_MAX_AGE': 600,
     }
-    
-    #, conn_max_age=600, ssl_require=True)
-    # 'default': {
 }
+
+# Debug database configuration
+print(f"🔍 Database Configuration:")
+print(f"   Host: {DATABASES['default']['HOST']}")
+print(f"   Port: {DATABASES['default']['PORT']}")
+print(f"   User: {DATABASES['default']['USER']}")
+print(f"   Database: {DATABASES['default']['NAME']}")
+print(f"   SSL Mode: {DATABASES['default']['OPTIONS']['sslmode']}")
 
 # Logging configuration
 LOGGING = {
