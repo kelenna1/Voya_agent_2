@@ -281,6 +281,11 @@ class ViatorService:
         for item in tours:
             images = item.get("images", [])
             thumbnail = images[0].get("url", "") if images else ""
+            # Get or create URL
+            web_url = item.get("webUrl", "")
+            if not web_url and item.get("productCode"):
+                web_url = f"https://www.viator.com/tours/d{item['productCode']}"
+            
             formatted.append({
                 "code": item.get("productCode", ""),
                 "title": item.get("title", "Untitled"),
@@ -289,7 +294,7 @@ class ViatorService:
                 "reviewCount": item.get("reviews", {}).get("totalReviews", 0),
                 "duration": item.get("duration", {}).get("durationText", "N/A"),
                 "thumbnail": thumbnail,
-                "url": self._add_affiliate_tracking(item.get("webUrl", ""))
+                "url": self._add_affiliate_tracking(web_url)
             })
         return formatted
 
