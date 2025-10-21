@@ -9,6 +9,9 @@ from dotenv import load_dotenv
 from agent.services.viator import ViatorService
 from agent.services.memory import DjangoConversationMemory
 from datetime import datetime, timedelta
+from agent.services.google import GooglePlacesService
+
+places = GooglePlacesService()
 
 # Load environment variables
 load_dotenv()
@@ -120,6 +123,28 @@ def get_destination_info(destination_name: str):
             "success": False,
             "message": f"Error resolving destination: {str(e)}"
         }
+    
+@tool
+def search_places(query: str, limit: int = 5):
+    """Search for places using Google Places API.
+    Example: 'restaurants in Rome', 'hotels near Eiffel Tower'"""
+    try:
+        results = places.search_places(query, limit)
+        if not results:
+            return {"success": False, "message": "No places found.", "places": []}
+        return {"success": True, "message": f"Found {len(results)} places", "places": results}
+    except Exception as e:
+        return {"success": False, "message": str(e), "places": []}
+
+
+@tool
+def get_place_info(place_id: str):
+    """Fetch detailed info for a specific place by its ID."""
+    try:
+        details = places.get_place_details(place_id)
+        return {"success": True, "details": details}
+    except Exception as e:
+        return {"success": False, "message": str(e)}
 
 # Define prompt
 prompt = ChatPromptTemplate.from_messages([
@@ -128,6 +153,9 @@ prompt = ChatPromptTemplate.from_messages([
 CRITICAL: You MUST use the available tools to search Viator's database for real tours. Do NOT provide general travel advice or recommendations without searching the Viator API first.
 
 Your capabilities:
+- Search for tours by activity and destination using Viator
+- Search for places, landmarks, hotels, or restaurants using Google Places
+- Combine both to give full travel recommendations (e.g., tours + nearby attractions)
 - Search for tours by activity type, destination, and dates using search_viator_tours
 - Check tour availability schedules using check_viator_availability  
 - Get destination information using get_destination_info
@@ -168,7 +196,8 @@ Be friendly, enthusiastic, and helpful. Make travel planning feel easy and excit
     ("placeholder", "{agent_scratchpad}"),
 ])
 # Create agent and executor (memory will be set per session)
-tools = [search_viator_tours, check_viator_availability, get_destination_info]
+tools = [search_viator_tours, check_viator_availability, get_destination_info, search_places,
+    get_place_info]
 agent = create_tool_calling_agent(llm, tools, prompt)
 
 # Default executor without memory (memory will be added per session)

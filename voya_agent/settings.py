@@ -181,13 +181,13 @@ DATABASES = {
     }
 }
 
-# Debug database configuration
-print(f"🔍 Database Configuration:")
-print(f"   Host: {DATABASES['default']['HOST']}")
-print(f"   Port: {DATABASES['default']['PORT']}")
-print(f"   User: {DATABASES['default']['USER']}")
-print(f"   Database: {DATABASES['default']['NAME']}")
-print(f"   SSL Mode: {DATABASES['default']['OPTIONS']['sslmode']}")
+# # Debug database configuration
+# print(f"🔍 Database Configuration:")
+# print(f"   Host: {DATABASES['default']['HOST']}")
+# print(f"   Port: {DATABASES['default']['PORT']}")
+# print(f"   User: {DATABASES['default']['USER']}")
+# print(f"   Database: {DATABASES['default']['NAME']}")
+# print(f"   SSL Mode: {DATABASES['default']['OPTIONS']['sslmode']}")
 
 # Logging configuration
 LOGGING = {
