@@ -1,3 +1,4 @@
+# agent/views.py
 from django.shortcuts import render
 from django.utils import timezone
 from django.db import transaction
@@ -17,8 +18,9 @@ from rest_framework.generics import ListAPIView
 import uuid
 import json
 
+
 class ChatView(APIView):
-    """Main chat API, handles chat for POST"""
+    """Main chat API with support for tours, places, and flights"""
     
     def post(self, request, *args, **kwargs):
         """Handle chat messages with proper serialization and database storage"""
@@ -56,41 +58,13 @@ class ChatView(APIView):
             result = session_executor.invoke({"input": user_input})
             ai_response = result.get("output", "Sorry, I couldn't process that.")
             
-            # Check if the response contains structured tour data
-            structured_response = None
-            if "TOUR_SEARCH_RESULT:" in ai_response:
-                try:
-                    # Extract JSON from the response
-                    json_start = ai_response.find("TOUR_SEARCH_RESULT:") + len("TOUR_SEARCH_RESULT:")
-                    json_part = ai_response[json_start:].strip()
-                    structured_response = json.loads(json_part)
-                except json.JSONDecodeError:
-                    # If JSON parsing fails, use the original response
-                    structured_response = None
-            elif ai_response.strip().startswith('{') and '"tours"' in ai_response:
-                # Handle case where the agent returns JSON directly
-                try:
-                    structured_response = json.loads(ai_response)
-                except json.JSONDecodeError:
-                    structured_response = None
+            # Check if the response contains structured data
+            structured_response = self._extract_structured_response(ai_response)
             
             # Clean non-serializable objects from result
-            def safe_json(value):
-                try:
-                    json.dumps(value)
-                    return value
-                except TypeError:
-                    if isinstance(value, dict):
-                        return {k: safe_json(v) for k, v in value.items()}
-                    elif isinstance(value, list):
-                        return [safe_json(v) for v in value]
-                    elif hasattr(value, "content"):
-                        return str(value.content)
-                    else:
-                        return str(value)
+            clean_result = self._safe_json(result)
 
-            clean_result = safe_json(result)
-
+            # Save assistant message
             assistant_message = Message.objects.create(
                 conversation=conversation,
                 message_type='assistant',
@@ -99,12 +73,10 @@ class ChatView(APIView):
                 metadata={'agent_result': clean_result}
             )
 
-            # Return structured response if available, otherwise return conversational response
+            # Return structured response if available, otherwise conversational
             if structured_response:
-                # Return the structured tour data
                 return Response(structured_response, status=status.HTTP_200_OK)
             else:
-                # Return conversational response
                 response_serializer = ChatResponseSerializer(data={
                     'output': ai_response,
                     'success': True,
@@ -123,17 +95,127 @@ class ChatView(APIView):
                     }, status=status.HTTP_200_OK)
                 
         except Exception as e:
-            # Check if it's a database-related error
-            error_msg = str(e)
-            if "no such table" in error_msg.lower():
-                error_msg = "Database not properly initialized. Please contact administrator."
-            elif "database is locked" in error_msg.lower():
-                error_msg = "Database is temporarily unavailable. Please try again."
-            
+            error_msg = self._format_error_message(str(e))
             return Response({
                 "error": f"An error occurred: {error_msg}",
                 "success": False
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _extract_structured_response(self, ai_response: str):
+        """Extract structured JSON from AI response if present"""
+        result_types = [
+            "TOUR_SEARCH_RESULT:",
+            "PLACES_SEARCH_RESULT:",
+            "PLACE_DETAILS_RESULT:",
+            "FLIGHT_SEARCH_RESULT:",
+            "FLIGHT_PRICE_RESULT:",
+            "FLIGHT_BOOKING_RESULT:",
+            "AVAILABILITY_RESULT:",
+            "DESTINATION_INFO_RESULT:",
+            "COMPLETE_TRIP_RESULT:"
+        ]
+        
+        for result_type in result_types:
+            if result_type in ai_response:
+                try:
+                    json_start = ai_response.find(result_type) + len(result_type)
+                    json_part = ai_response[json_start:].strip()
+                    return json.loads(json_part)
+                except json.JSONDecodeError:
+                    continue
+        
+        # Check if response is pure JSON
+        if ai_response.strip().startswith('{'):
+            try:
+                return json.loads(ai_response)
+            except json.JSONDecodeError:
+                pass
+        
+        return None
+    
+    def _safe_json(self, value):
+        """Recursively clean non-serializable objects"""
+        try:
+            json.dumps(value)
+            return value
+        except TypeError:
+            if isinstance(value, dict):
+                return {k: self._safe_json(v) for k, v in value.items()}
+            elif isinstance(value, list):
+                return [self._safe_json(v) for v in value]
+            elif hasattr(value, "content"):
+                return str(value.content)
+            else:
+                return str(value)
+    
+    def _format_error_message(self, error_str: str) -> str:
+        """Format error messages for user display"""
+        if "no such table" in error_str.lower():
+            return "Database not properly initialized. Please contact administrator."
+        elif "database is locked" in error_str.lower():
+            return "Database is temporarily unavailable. Please try again."
+        elif "mistifly" in error_str.lower():
+            return "Flight service temporarily unavailable. Please try again."
+        elif "viator" in error_str.lower():
+            return "Tour service temporarily unavailable. Please try again."
+        return error_str
+
+
+class FlightSearchView(APIView):
+    """Direct flight search endpoint (bypasses agent)"""
+    
+    def post(self, request, *args, **kwargs):
+        """Search for flights directly using Mistifly API"""
+        try:
+            from .services.mistifly import MistiflyService
+            
+            # Extract search parameters
+            origin = request.data.get('origin', '').upper()
+            destination = request.data.get('destination', '').upper()
+            departure_date = request.data.get('departure_date')
+            return_date = request.data.get('return_date')
+            adults = int(request.data.get('adults', 1))
+            cabin_class = request.data.get('cabin_class', 'ECONOMY').upper()
+            
+            # Validate required fields
+            if not all([origin, destination, departure_date]):
+                return Response({
+                    'success': False,
+                    'message': 'Origin, destination, and departure date are required',
+                    'flights': []
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Search flights
+            mistifly = MistiflyService()
+            flights = mistifly.search_flights(
+                origin=origin,
+                destination=destination,
+                departure_date=departure_date,
+                return_date=return_date,
+                adults=adults,
+                cabin_class=cabin_class
+            )
+            
+            return Response({
+                'success': True,
+                'message': f"Found {len(flights)} flights",
+                'flights': flights,
+                'search_params': {
+                    'origin': origin,
+                    'destination': destination,
+                    'departure_date': departure_date,
+                    'return_date': return_date,
+                    'passengers': adults
+                }
+            }, status=status.HTTP_200_OK)
+                
+        except Exception as e:
+            return Response({
+                'success': False,
+                'message': f"Error searching flights: {str(e)}",
+                'flights': []
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class ConversationListView(ListAPIView):
     """API endpoint to list conversations"""
@@ -154,7 +236,6 @@ class ConversationListView(ListAPIView):
         """Override list to provide enhanced conversation data"""
         queryset = self.get_queryset()
         
-        # Generate summaries for each conversation
         conversations_data = []
         for conv in queryset:
             summary = ConversationSearchService.get_conversation_summary(conv)
@@ -177,6 +258,7 @@ class ConversationListView(ListAPIView):
             'total': len(conversations_data)
         }, status=status.HTTP_200_OK)
 
+
 class TourSearchView(APIView):
     """API endpoint for direct tour search"""
     
@@ -197,7 +279,6 @@ class TourSearchView(APIView):
             search_params = serializer.validated_data
             viator = ViatorService()
             
-            # Perform search
             tours = viator.search_tours(
                 query=search_params.get('query'),
                 destination=search_params['destination'],
@@ -224,7 +305,6 @@ class TourSearchView(APIView):
                 )
                 cached_tours.append(tour)
             
-            # Serialize response
             tour_serializer = TourSerializer(cached_tours, many=True)
             response_serializer = TourSearchResponseSerializer(data={
                 'success': True,
@@ -251,6 +331,7 @@ class TourSearchView(APIView):
                 'tours': []
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 class ConversationSearchView(APIView):
     """API endpoint for searching conversations"""
     
@@ -267,7 +348,6 @@ class ConversationSearchView(APIView):
                 limit=limit
             )
             
-            # Generate summaries for each conversation
             conversation_summaries = []
             for conv in conversations:
                 summary = ConversationSearchService.get_conversation_summary(conv)
@@ -291,6 +371,7 @@ class ConversationSearchView(APIView):
                 'conversations': []
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 class ConversationDetailView(APIView):
     """API endpoint for getting conversation details and messages"""
     
@@ -309,10 +390,8 @@ class ConversationDetailView(APIView):
                     'error': 'Either conversation_id or session_id must be provided'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # Get all messages for this conversation
             messages = conversation.messages.all().order_by('timestamp')
             
-            # Serialize messages
             message_data = []
             for message in messages:
                 message_data.append({
@@ -323,7 +402,6 @@ class ConversationDetailView(APIView):
                     'metadata': message.metadata
                 })
             
-            # Generate conversation summary
             summary = ConversationSearchService.get_conversation_summary(conversation)
             
             return Response({
@@ -349,14 +427,13 @@ class ConversationDetailView(APIView):
                 'error': f"Error retrieving conversation: {str(e)}"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 @api_view(['POST'])
 def create_conversation(request):
     """Create a new conversation"""
     try:
-        # Generate a new session ID
         new_session_id = str(uuid.uuid4())
         
-        # Create new conversation
         conversation = Conversation.objects.create(
             session_id=new_session_id,
             created_at=timezone.now()
@@ -380,13 +457,13 @@ def create_conversation(request):
             'error': f"Error creating conversation: {str(e)}"
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 @api_view(['PUT'])
 def update_conversation(request, conversation_id):
     """Update conversation title or other metadata"""
     try:
         conversation = Conversation.objects.get(id=conversation_id)
         
-        # Get new title from request data
         new_title = request.data.get('title', '').strip()
         
         if new_title:
@@ -420,6 +497,7 @@ def update_conversation(request, conversation_id):
             'error': f"Error updating conversation: {str(e)}"
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 @api_view(['DELETE'])
 def delete_conversation(request, conversation_id):
     """Delete a conversation and all its messages"""
@@ -443,6 +521,7 @@ def delete_conversation(request, conversation_id):
             'error': f"Error deleting conversation: {str(e)}"
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 @api_view(['GET'])
 def health_check(request):
     """Health check endpoint for hosting platforms"""
@@ -450,5 +529,10 @@ def health_check(request):
         "status": "healthy",
         "service": "Voya Agent API",
         "timestamp": timezone.now().isoformat(),
-        "version": "1.0.0"
+        "version": "1.0.0",
+        "services": {
+            "flights": "mistifly",
+            "tours": "viator",
+            "places": "google"
+        }
     }, status=status.HTTP_200_OK)

@@ -13,7 +13,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 from pathlib import Path
 import os
 import sys
-from dotenv import load_dotenv
+from dotenv import load_dotenv  
 load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -181,14 +181,6 @@ DATABASES = {
     }
 }
 
-# # Debug database configuration
-# print(f"🔍 Database Configuration:")
-# print(f"   Host: {DATABASES['default']['HOST']}")
-# print(f"   Port: {DATABASES['default']['PORT']}")
-# print(f"   User: {DATABASES['default']['USER']}")
-# print(f"   Database: {DATABASES['default']['NAME']}")
-# print(f"   SSL Mode: {DATABASES['default']['OPTIONS']['sslmode']}")
-
 # Logging configuration
 LOGGING = {
     'version': 1,
@@ -229,7 +221,7 @@ LOGGING = {
         },
     },
 }
-import os
+
 
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)

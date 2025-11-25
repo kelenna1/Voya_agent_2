@@ -1,4 +1,4 @@
-# agent/agent.py
+# agent/agent.py - FIXED VERSION
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain.agents import create_tool_calling_agent, AgentExecutor
@@ -8,38 +8,29 @@ import os
 import json
 from dotenv import load_dotenv
 from agent.services.viator import ViatorService
+from agent.services.google import GooglePlacesService
+from agent.services.mistifly import MistiflyService
 from agent.services.memory import DjangoConversationMemory
 from datetime import datetime, timedelta
-from agent.services.google import GooglePlacesService
-
-places = GooglePlacesService()
 
 # Load environment variables
 load_dotenv()
 
-# Initialize LLM  
+# Initialize services
 llm = ChatOpenAI(model="gpt-4o-mini", api_key=os.getenv("OPENAI_API_KEY"))
-
-# Initialize ViatorService
 viator = ViatorService()
+places = GooglePlacesService()
+mistifly = MistiflyService()
 
-# Define tools
+# ================================================================
+# VIATOR TOOLS (Tours & Activities)
+# ================================================================
+
 @tool
 def search_viator_tours(query: str = "tour", destination: str = "Rome", date: str = None, limit: int = 5):
-    """Search for tours based on query, destination, and date.
-    
-    Args:
-        query: The type of tour (e.g., "walking tour", "food tour", "museum tour")
-        destination: The city or destination name (e.g., "Rome", "Paris", "London")
-        date: Start date in YYYY-MM-DD format (defaults to 7 days from now)
-        limit: Maximum number of results to return (default 5)
-    
-    Returns:
-        Structured JSON response with success, message, and tours array
-    """
+    """Search for tours based on query, destination, and date."""
     try:
         if not date:
-            # Use a future date (7 days from now) to avoid past dates
             date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
         
         tours = viator.search_tours(query, destination, date, limit)
@@ -47,16 +38,14 @@ def search_viator_tours(query: str = "tour", destination: str = "Rome", date: st
         if not tours:
             result = {
                 "success": False,
-                "message": f"No tours found for '{query}' in {destination} starting {date}. Try broader search terms or different destinations.",
+                "message": f"No tours found for '{query}' in {destination} starting {date}.",
                 "tours": [],
                 "destination": {"name": destination}
             }
             return f"TOUR_SEARCH_RESULT: {json.dumps(result)}"
         
-        # Format tours for frontend
         formatted_tours = []
         for tour in tours:
-            # Create fallback URL if none provided
             tour_url = tour.get("url", "")
             if not tour_url and tour.get("code"):
                 tour_url = f"https://www.viator.com/tours/d{tour['code']}"
@@ -73,7 +62,7 @@ def search_viator_tours(query: str = "tour", destination: str = "Rome", date: st
         
         result = {
             "success": True,
-            "message": f"Found {len(formatted_tours)} tours for '{query}' in {destination} starting {date}.",
+            "message": f"Found {len(formatted_tours)} tours for '{query}' in {destination}.",
             "tours": formatted_tours,
             "destination": {"name": destination}
         }
@@ -87,26 +76,12 @@ def search_viator_tours(query: str = "tour", destination: str = "Rome", date: st
         }
         return f"TOUR_SEARCH_RESULT: {json.dumps(result)}"
 
+
 @tool
 def check_viator_availability(product_code: str):
-    """Check availability schedules for a specific tour product.
-    
-    Args:
-        product_code: The Viator product code from search results
-    
-    Returns:
-        List of available schedules with dates and times, or error message
-    """
+    """Check availability schedules for a specific tour product."""
     try:
         schedules = viator.check_availability(product_code)
-        
-        if not schedules:
-            return {
-                "success": False,
-                "message": f"No availability data found for product {product_code}. This may be a sandbox limitation.",
-                "schedules": []
-            }
-        
         return {
             "success": True,
             "message": f"Found {len(schedules)} available schedules",
@@ -119,25 +94,12 @@ def check_viator_availability(product_code: str):
             "schedules": []
         }
 
+
 @tool
 def get_destination_info(destination_name: str):
-    """Get the Viator destination ID for a given city or destination name.
-    
-    Args:
-        destination_name: Name of the destination (e.g., "Rome", "Paris", "London")
-    
-    Returns:
-        Destination ID if found, or error message
-    """
+    """Get the Viator destination ID for a given city."""
     try:
         dest_id = viator.resolve_destination(destination_name)
-        
-        if not dest_id:
-            return {
-                "success": False,
-                "message": f"Could not find destination '{destination_name}'. Try: Rome, Paris, London, or other major cities."
-            }
-        
         return {
             "success": True,
             "message": f"Found destination {destination_name}",
@@ -149,18 +111,56 @@ def get_destination_info(destination_name: str):
             "success": False,
             "message": f"Error resolving destination: {str(e)}"
         }
-    
+
+
+# ================================================================
+# GOOGLE PLACES TOOLS (Hotels, Restaurants, Landmarks)
+# ================================================================
+
 @tool
 def search_places(query: str, limit: int = 5):
-    """Search for places using Google Places API.
-    Example: 'restaurants in Rome', 'hotels near Eiffel Tower'"""
+    """Search for places using Google Places API."""
     try:
         results = places.search_places(query, limit)
+        
         if not results:
-            return {"success": False, "message": "No places found.", "places": []}
-        return {"success": True, "message": f"Found {len(results)} places", "places": results}
+            result = {
+                "success": False,
+                "message": f"No places found for '{query}'.",
+                "places": []
+            }
+            return f"PLACES_SEARCH_RESULT: {json.dumps(result)}"
+        
+        formatted_places = []
+        for place in results:
+            formatted_places.append({
+                "place_id": place.get("place_id", ""),
+                "name": place.get("name", "Unknown"),
+                "address": place.get("address", ""),
+                "rating": float(place.get("rating", 0)),
+                "user_ratings_total": int(place.get("user_ratings_total", 0)),
+                "types": place.get("types", []),
+                "photo_url": place.get("photo_url", ""),
+                "location": {
+                    "latitude": place.get("location", {}).get("latitude"),
+                    "longitude": place.get("location", {}).get("longitude")
+                }
+            })
+        
+        result = {
+            "success": True,
+            "message": f"Found {len(formatted_places)} places for '{query}'.",
+            "places": formatted_places
+        }
+        return f"PLACES_SEARCH_RESULT: {json.dumps(result)}"
+        
     except Exception as e:
-        return {"success": False, "message": str(e), "places": []}
+        result = {
+            "success": False,
+            "message": f"Error searching places: {str(e)}",
+            "places": []
+        }
+        return f"PLACES_SEARCH_RESULT: {json.dumps(result)}"
 
 
 @tool
@@ -168,71 +168,373 @@ def get_place_info(place_id: str):
     """Fetch detailed info for a specific place by its ID."""
     try:
         details = places.get_place_details(place_id)
-        return {"success": True, "details": details}
+        
+        result = {
+            "success": True,
+            "message": f"Retrieved details for place {place_id}",
+            "place": {
+                "place_id": details.get("place_id", ""),
+                "name": details.get("name", ""),
+                "address": details.get("address", ""),
+                "website": details.get("website", ""),
+                "phone": details.get("phone", ""),
+                "rating": float(details.get("rating", 0)),
+                "user_ratings_total": int(details.get("user_ratings_total", 0)),
+                "location": details.get("location", {}),
+                "photos": details.get("photos", []),
+                "opening_hours": details.get("opening_hours", {})
+            }
+        }
+        return f"PLACE_DETAILS_RESULT: {json.dumps(result)}"
+        
     except Exception as e:
-        return {"success": False, "message": str(e)}
+        result = {
+            "success": False,
+            "message": f"Error fetching place details: {str(e)}",
+            "place": None
+        }
+        return f"PLACE_DETAILS_RESULT: {json.dumps(result)}"
 
-# Define prompt
+
+# ================================================================
+# MISTIFLY TOOLS (Flights) - FIXED
+# ================================================================
+
+@tool
+def search_flights(
+    origin: str,
+    destination: str,
+    departure_date: str,
+    return_date: str = None,
+    adults: int = 1,
+    cabin_class: str = "ECONOMY",
+    limit: int = 5
+):
+    """Search for flights using Mistifly.
+    
+    Args:
+        origin: Origin airport code (e.g., "LOS" for Lagos)
+        destination: Destination airport code (e.g., "DXB" for Dubai)
+        departure_date: Departure date in YYYY-MM-DD format
+        return_date: Return date for round trip (optional)
+        adults: Number of adult passengers
+        cabin_class: ECONOMY, PREMIUM_ECONOMY, BUSINESS, or FIRST
+        limit: Max results (default 5, max 10)
+    
+    Returns:
+        Structured JSON response with flights array
+    """
+    try:
+        # ✅ FIX 1: Date validation and auto-correction
+        try:
+            dep_date = datetime.strptime(departure_date, "%Y-%m-%d")
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # If departure date is in the past, move to next year
+            if dep_date < today:
+                dep_date = dep_date.replace(year=today.year + 1)
+                departure_date = dep_date.strftime("%Y-%m-%d")
+                print(f"[Date Fix] Adjusted departure to {departure_date}")
+            
+            # Same for return date
+            if return_date:
+                ret_date = datetime.strptime(return_date, "%Y-%m-%d")
+                if ret_date < dep_date:
+                    ret_date = ret_date.replace(year=dep_date.year)
+                    if ret_date < dep_date:
+                        ret_date = ret_date.replace(year=dep_date.year + 1)
+                    return_date = ret_date.strftime("%Y-%m-%d")
+                    print(f"[Date Fix] Adjusted return to {return_date}")
+                    
+        except ValueError:
+            # If date parsing fails, let Mistifly handle it
+            pass
+        
+        # Search flights
+        flights = mistifly.search_flights(
+            origin=origin.upper(),
+            destination=destination.upper(),
+            departure_date=departure_date,
+            return_date=return_date,
+            adults=adults,
+            cabin_class=cabin_class.upper(),
+            limit=limit
+        )
+        
+        if not flights:
+            result = {
+                "success": False,
+                "message": f"No flights found from {origin} to {destination} on {departure_date}.",
+                "flights": []
+            }
+            return f"FLIGHT_SEARCH_RESULT: {json.dumps(result)}"
+        
+        # ✅ FIX 2: Inject search_params into EACH flight
+        search_params = {
+            "origin": origin.upper(),
+            "destination": destination.upper(),
+            "departure_date": departure_date,
+            "return_date": return_date,
+            "passengers": adults
+        }
+        
+        for flight in flights:
+            flight["search_params"] = search_params
+        
+        result = {
+            "success": True,
+            "message": f"Found {len(flights)} flights from {origin} to {destination}.",
+            "flights": flights,
+            "search_params": search_params
+        }
+        return f"FLIGHT_SEARCH_RESULT: {json.dumps(result)}"
+        
+    except Exception as e:
+        result = {
+            "success": False,
+            "message": f"Error searching flights: {str(e)}",
+            "flights": []
+        }
+        return f"FLIGHT_SEARCH_RESULT: {json.dumps(result)}"
+
+
+@tool
+def check_flight_price(flight_id: str, raw_itinerary: dict):
+    """Revalidate flight price before booking."""
+    try:
+        price_info = mistifly.check_price(flight_id, raw_itinerary)
+        
+        result = {
+            "success": True,
+            "message": "Price validated successfully",
+            "price_info": price_info
+        }
+        return f"FLIGHT_PRICE_RESULT: {json.dumps(result)}"
+        
+    except Exception as e:
+        result = {
+            "success": False,
+            "message": f"Error checking flight price: {str(e)}",
+            "price_info": None
+        }
+        return f"FLIGHT_PRICE_RESULT: {json.dumps(result)}"
+
+
+@tool
+def book_flight(
+    flight_data: dict,
+    passengers: list,
+    contact_email: str,
+    contact_phone: str
+):
+    """Book a flight with passenger details.
+    
+    Args:
+        flight_data: The selected flight object from search_flights (now has search_params!)
+        passengers: List of passenger dicts with name, dob, passport, etc.
+        contact_email: Contact email
+        contact_phone: Contact phone (with country code)
+    
+    Returns:
+        Booking confirmation with OrderID and PNR
+    """
+    try:
+        # Check if we have raw_itinerary
+        if "raw_itinerary" not in flight_data or not flight_data["raw_itinerary"]:
+            # Extract search params (now embedded in each flight)
+            search_params = flight_data.get("search_params", {})
+            
+            # Get flight index
+            flight_id = flight_data.get("id", "flight_0")
+            flight_index = int(flight_id.split("_")[1]) if "_" in flight_id else 0
+            
+            # Get required params
+            origin = search_params.get("origin") or flight_data.get("origin")
+            destination = search_params.get("destination") or flight_data.get("destination")
+            departure_date = search_params.get("departure_date")
+            return_date = search_params.get("return_date")
+            
+            if not all([origin, destination, departure_date]):
+                return f"FLIGHT_BOOKING_RESULT: {json.dumps({
+                    'success': False,
+                    'message': 'Cannot book: missing search parameters. Please search again.',
+                    'booking': None
+                })}"
+            
+            # Re-fetch with full itinerary
+            try:
+                full_flight = mistifly.get_full_itinerary_for_booking(
+                    origin=origin,
+                    destination=destination,
+                    departure_date=departure_date,
+                    return_date=return_date,
+                    flight_index=flight_index
+                )
+                flight_data = full_flight
+            except Exception as e:
+                return f"FLIGHT_BOOKING_RESULT: {json.dumps({
+                    'success': False,
+                    'message': f'Could not retrieve full flight data: {str(e)}',
+                    'booking': None
+                })}"
+        
+        # Now we have raw_itinerary, proceed with booking
+        booking_info = mistifly.book_flight(
+            itinerary=flight_data,
+            passengers=passengers,
+            contact_email=contact_email,
+            contact_phone=contact_phone
+        )
+        
+        result = {
+            "success": True,
+            "message": "Flight booked successfully! Proceed with payment to issue ticket.",
+            "booking": booking_info
+        }
+        return f"FLIGHT_BOOKING_RESULT: {json.dumps(result)}"
+        
+    except Exception as e:
+        result = {
+            "success": False,
+            "message": f"Error booking flight: {str(e)}",
+            "booking": None
+        }
+        return f"FLIGHT_BOOKING_RESULT: {json.dumps(result)}"
+
+
+@tool
+def issue_ticket(order_id: str):
+    """Issue e-ticket after payment is completed.
+    
+    IMPORTANT: Only call this AFTER payment has been processed!
+    """
+    try:
+        ticket_info = mistifly.issue_ticket(order_id)
+        
+        result = {
+            "success": True,
+            "message": "E-ticket issued successfully!",
+            "ticket": ticket_info
+        }
+        return f"TICKET_ISSUE_RESULT: {json.dumps(result)}"
+        
+    except Exception as e:
+        result = {
+            "success": False,
+            "message": f"Error issuing ticket: {str(e)}",
+            "ticket": None
+        }
+        return f"TICKET_ISSUE_RESULT: {json.dumps(result)}"
+
+
+# ================================================================
+# AGENT PROMPT
+# ================================================================
+
 prompt = ChatPromptTemplate.from_messages([
-    ("system", """You arE Avoya, the Voya travel assistant. You help users discover and explore tours using Viator's extensive catalog of real tours worldwide.
+    ("system", """You are Avoya, the comprehensive Voya travel assistant. You help users plan complete trips including flights, tours, and places to visit.
 
-CRITICAL: You MUST use the available tools to search Viator's database for real tours. Do NOT provide general travel advice or recommendations without searching the Viator API first.
+CRITICAL RESPONSE FORMAT RULES:
+1. When a tool returns a result with a prefix like "FLIGHT_SEARCH_RESULT:", "TOUR_SEARCH_RESULT:", "PLACES_SEARCH_RESULT:", etc., you MUST:
+   - Extract ONLY the JSON content after the colon
+   - Return it as PURE JSON (not as a string, not escaped, not in code blocks)
+   - Do NOT add any text before or after the JSON
+   - Return the raw JSON object exactly as it appears
 
-Your capabilities:
-- Search for tours by activity and destination using Viator
-- Search for places, landmarks, hotels, or restaurants using Google Places
-- Combine both to give full travel recommendations (e.g., tours + nearby attractions)
-- Search for tours by activity type, destination, and dates using search_viator_tours
-- Check tour availability schedules using check_viator_availability  
-- Get destination information using get_destination_info
-- Provide detailed tour information (pricing, duration, ratings, reviews)
-- Generate booking links for users to complete their reservations
+Your comprehensive capabilities:
+- **Flights**: Search for flights between cities using Mistifly (search_flights)
+- **Tours & Activities**: Search for tours and activities using Viator (search_viator_tours)
+- **Places**: Find hotels, restaurants, and landmarks using Google Places (search_places)
+- **Complete Trip Planning**: Combine all three services for comprehensive travel recommendations
 
-MANDATORY workflow for tour requests:
-1. ALWAYS use search_viator_tours tool when users ask about tours, destinations, or activities
-2. If you need destination info first, use get_destination_info
-3. IMPORTANT: When you receive a TOUR_SEARCH_RESULT from the tool, you MUST return the EXACT JSON structure that was provided by the tool. Do NOT format it as conversational text.
-4. If the tool returns a TOUR_SEARCH_RESULT, extract and return ONLY the JSON content without any additional formatting or conversational text.
+MANDATORY workflow for different queries:
+1. Flight queries ("find me flights to Dubai", "book a ticket to London"):
+   - ALWAYS use search_flights with proper IATA codes
+   - For common cities, you know the codes (LOS=Lagos, DXB=Dubai, LHR=London, JFK=New York, etc.)
+   
+2. Tour/activity queries ("tours in Rome", "what to do in Paris"):
+   - ALWAYS use search_viator_tours
+   
+3. Place queries ("hotels near Eiffel Tower", "restaurants in Rome"):
+   - ALWAYS use search_places
+   
+4. Complete trip planning ("plan a trip to Dubai", "I'm visiting London for a week"):
+   - Use search_flights for transportation
+   - Use search_viator_tours for activities
+   - Use search_places for accommodations and dining
+   - Combine all results into one comprehensive response
 
-For tour search requests, return responses in this EXACT JSON format:
-{{
-  "success": boolean,
-  "message": "Conversational response text here. Be friendly and helpful.",
-  "tours": [
-    {{
-      "code": "string",
-      "title": "string", 
-      "price": number,
-      "rating": number,
-      "duration": "string",
-      "url": "string",
-      "thumbnail": "string"
-    }}
-  ],
-  "destination": {{"name": "string"}}
-}}
+Expected response formats:
+
+For flight searches:
+{{{{
+  "success": true/false,
+  "message": "description",
+  "flights": [array of flight objects with airline, price, duration, stops],
+  "search_params": {{{{origin, destination, dates}}}}
+}}}}
+
+For tour searches:
+{{{{
+  "success": true/false,
+  "message": "description",
+  "tours": [array of tour objects],
+  "destination": {{{{"name": "destination"}}}}
+}}}}
+
+For place searches:
+{{{{
+  "success": true/false,
+  "message": "description",
+  "places": [array of place objects]
+}}}}
+
+For combined trip planning:
+{{{{
+  "success": true,
+  "message": "Complete trip plan",
+  "flights": [flights array],
+  "tours": [tours array],
+  "places": [places array],
+  "destination": "destination name"
+}}}}
 
 Important guidelines:
-- NEVER give general travel advice without searching Viator first
-- Always ask for clarification if the request is vague, state what else you need to perform a smooth search
-- Help the developer debug exactly what's wrong by telling him what your response was and if you're getting result from the viator api and do this only if you the user says "programmer is here", you'd welcome him as the programmer and help debug if there's issues
-- When users want to book, provide the direct Viator URL for the tour
-- You can search and recommend but cannot complete bookings (users book on Viator)
-- Use chat history to maintain context and personalize recommendations
-- For tour searches, ALWAYS return the structured JSON format, not conversational text
+- ALWAYS search APIs before giving advice
+- For flight searches, convert city names to IATA codes automatically
+- When users want to book flights, explain they need to provide passenger details
+- Maintain conversation context using chat history
+- Be proactive: if someone asks about a destination, offer flights, tours, AND places
+- ALWAYS return pure JSON when tools return *_RESULT formatted responses
 
-Be friendly, enthusiastic, and helpful. Make travel planning feel easy and exciting!"""),
+Be helpful and provide comprehensive travel solutions!"""),
     ("placeholder", "{chat_history}"),
     ("human", "{input}"),
     ("placeholder", "{agent_scratchpad}"),
 ])
-# Create agent and executor (memory will be set per session)
-tools = [search_viator_tours, check_viator_availability, get_destination_info, search_places,
-    get_place_info]
-agent = create_tool_calling_agent(llm, tools, prompt)
 
-# Default executor without memory (memory will be added per session)
+# ================================================================
+# AGENT CONFIGURATION
+# ================================================================
+
+tools = [
+    # Flights
+    search_flights,
+    check_flight_price,
+    book_flight,
+    issue_ticket,
+    # Tours
+    search_viator_tours,
+    check_viator_availability,
+    get_destination_info,
+    # Places
+    search_places,
+    get_place_info
+]
+
+agent = create_tool_calling_agent(llm, tools, prompt)
 default_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
+
 
 def create_executor_with_memory(session_id: str = None) -> AgentExecutor:
     """Create an executor with Django-based memory for a specific session."""
@@ -240,26 +542,8 @@ def create_executor_with_memory(session_id: str = None) -> AgentExecutor:
         memory = DjangoConversationMemory(session_id=session_id, max_history_length=20)
         return AgentExecutor(agent=agent, tools=tools, verbose=True, memory=memory)
     else:
-        # Fallback to default memory for backward compatibility
         memory = ConversationBufferWindowMemory(memory_key="chat_history", return_messages=True, k=20)
         return AgentExecutor(agent=agent, tools=tools, verbose=True, memory=memory)
 
-# Keep the default executor for backward compatibility
-executor = default_executor
 
-# Test the agent with conversation
-if __name__ == "__main__":
-    test_conversation = [
-        "find me tours in rome",
-        "came to rome for a weekend, can you plan a trip or tour for me around the city",
-        "let's say food related... just for the next 3 days"
-    ]
-    
-    print("=== Testing Voya Agent (Captain-V) ===\n")
-    
-    for user_input in test_conversation:
-        print(f"\nUser: {user_input}")
-        print("-" * 60)
-        result = executor.invoke({"input": user_input})
-        print(f"\nCaptain-V: {result['output']}")
-        print("=" * 60)
+executor = default_executor
