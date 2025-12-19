@@ -19,13 +19,21 @@ urlpatterns = [
     path('conversations/<int:conversation_id>/delete/', views.delete_conversation, name='delete-conversation'),
     
     # ================================================================
-    # FLIGHT ENDPOINTS (NEW - Direct API access)
+    # FLIGHT ENDPOINTS (Direct API access)
     # ================================================================
-    path('flights/search/', views.FlightSearchView.as_view(), name='flight-search'), 
-    # Optional: Add these if you want direct booking endpoints later
-    # path('flights/book/', views.FlightBookingView.as_view(), name='flight-book'),
-    # path('flights/bookings/', views.FlightBookingListView.as_view(), name='flight-bookings'),
-    # path('flights/bookings/<str:order_id>/', views.FlightBookingDetailView.as_view(), name='flight-booking-detail'),
+    path('flights/search/', views.FlightSearchView.as_view(), name='flight-search'),
+    
+    # ================================================================
+    # BOOKING & PAYMENT ENDPOINTS (NEW!)
+    # ================================================================
+    path('bookings/create/', views.CreateFlightBookingView.as_view(), name='create-booking'),
+    path('bookings/<uuid:booking_id>/status/', views.BookingStatusView.as_view(), name='booking-status'),
+    path('bookings/<uuid:booking_id>/retry-payment/', views.RetryPaymentView.as_view(), name='retry-payment'),
+    
+    # ================================================================
+    # WEBHOOK ENDPOINT (CRITICAL - Monei will call this!)
+    # ================================================================
+    path('webhooks/monei/', views.MoneiWebhookView.as_view(), name='monei-webhook'),
     
     # ================================================================
     # TOUR ENDPOINTS
@@ -33,7 +41,7 @@ urlpatterns = [
     path('tours/search/', views.TourSearchView.as_view(), name='tour-search'),
     
     # ================================================================
-    # PLACE ENDPOINTS (Optional - if you want direct place search)
+    # PLACE ENDPOINTS (Optional - uncomment if needed)
     # ================================================================
     # path('places/search/', views.PlaceSearchView.as_view(), name='place-search'),
     

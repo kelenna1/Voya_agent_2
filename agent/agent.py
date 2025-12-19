@@ -225,30 +225,73 @@ def search_flights(
         Structured JSON response with flights array
     """
     try:
-        # ✅ FIX 1: Date validation and auto-correction
+        # ✅ Date validation and auto-correction
         try:
             dep_date = datetime.strptime(departure_date, "%Y-%m-%d")
             today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             
-            # If departure date is in the past, move to next year
+            # If departure is in the past, intelligently adjust
             if dep_date < today:
-                dep_date = dep_date.replace(year=today.year + 1)
+                # Extract month and day
+                target_month = dep_date.month
+                target_day = dep_date.day
+                
+                # Check if this month/day has passed this year
+                this_year_date = today.replace(month=target_month, day=target_day)
+                
+                if this_year_date >= today:
+                    # Month/day is still ahead this year - use this year
+                    dep_date = this_year_date
+                    print(f"[Date Fix] Adjusted to this year: {dep_date.strftime('%Y-%m-%d')}")
+                else:
+                    # Month/day already passed this year - use next year
+                    dep_date = this_year_date.replace(year=today.year + 1)
+                    print(f"[Date Fix] Adjusted to next year: {dep_date.strftime('%Y-%m-%d')}")
+                
                 departure_date = dep_date.strftime("%Y-%m-%d")
-                print(f"[Date Fix] Adjusted departure to {departure_date}")
             
-            # Same for return date
+            # If departure is more than 2 years in the future, normalize
+            elif (dep_date - today).days > 730:  # 2 years
+                target_month = dep_date.month
+                target_day = dep_date.day
+                this_year_date = today.replace(month=target_month, day=target_day)
+                
+                if this_year_date >= today:
+                    dep_date = this_year_date
+                else:
+                    dep_date = this_year_date.replace(year=today.year + 1)
+                
+                departure_date = dep_date.strftime("%Y-%m-%d")
+                print(f"[Date Fix] Far future normalized to {departure_date}")
+            
+            # Same logic for return date
             if return_date:
                 ret_date = datetime.strptime(return_date, "%Y-%m-%d")
-                if ret_date < dep_date:
-                    ret_date = ret_date.replace(year=dep_date.year)
-                    if ret_date < dep_date:
-                        ret_date = ret_date.replace(year=dep_date.year + 1)
-                    return_date = ret_date.strftime("%Y-%m-%d")
-                    print(f"[Date Fix] Adjusted return to {return_date}")
+                
+                # Return must be after departure
+                if ret_date <= dep_date:
+                    target_month = ret_date.month
+                    target_day = ret_date.day
                     
-        except ValueError:
+                    # Try same year as departure first
+                    try:
+                        same_year = dep_date.replace(month=target_month, day=target_day)
+                        if same_year > dep_date:
+                            ret_date = same_year
+                        else:
+                            ret_date = same_year.replace(year=dep_date.year + 1)
+                    except ValueError:
+                        # Invalid date (like Feb 30), use next valid date
+                        ret_date = dep_date + timedelta(days=7)
+                    
+                    return_date = ret_date.strftime("%Y-%m-%d")
+                    print(f"[Date Fix] Return adjusted to {return_date}")
+                    
+        except ValueError as e:
             # If date parsing fails, let Mistifly handle it
+            print(f"[Date Warning] Could not parse dates: {e}")
             pass
+        
         
         # Search flights
         flights = mistifly.search_flights(
@@ -267,9 +310,11 @@ def search_flights(
                 "message": f"No flights found from {origin} to {destination} on {departure_date}.",
                 "flights": []
             }
-            return f"FLIGHT_SEARCH_RESULT: {json.dumps(result)}"
+            result_str = f"FLIGHT_SEARCH_RESULT: {json.dumps(result)}"
+            print(f"[DEBUG] Returning (no flights): {result_str}")
+            return result_str
         
-        # ✅ FIX 2: Inject search_params into EACH flight
+        # ✅ Inject search_params into EACH flight
         search_params = {
             "origin": origin.upper(),
             "destination": destination.upper(),
@@ -287,15 +332,23 @@ def search_flights(
             "flights": flights,
             "search_params": search_params
         }
-        return f"FLIGHT_SEARCH_RESULT: {json.dumps(result)}"
+        result_str = f"FLIGHT_SEARCH_RESULT: {json.dumps(result)}"
+        print(f"[DEBUG] Returning (success): {result_str[:200]}...")
+        return result_str
         
     except Exception as e:
+        print(f"[ERROR] search_flights exception: {e}")
+        import traceback
+        traceback.print_exc()
+        
         result = {
             "success": False,
             "message": f"Error searching flights: {str(e)}",
             "flights": []
         }
-        return f"FLIGHT_SEARCH_RESULT: {json.dumps(result)}"
+        result_str = f"FLIGHT_SEARCH_RESULT: {json.dumps(result)}"
+        print(f"[DEBUG] Returning (error): {result_str}")
+        return result_str
 
 
 @tool
@@ -432,80 +485,23 @@ def issue_ticket(order_id: str):
 # ================================================================
 
 prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are Avoya, the comprehensive Voya travel assistant. You help users plan complete trips including flights, tours, and places to visit.
+    ("system", """You are Avoya, a travel assistant helping users plan trips with flights, tours, and places.
 
-CRITICAL RESPONSE FORMAT RULES:
-1. When a tool returns a result with a prefix like "FLIGHT_SEARCH_RESULT:", "TOUR_SEARCH_RESULT:", "PLACES_SEARCH_RESULT:", etc., you MUST:
-   - Extract ONLY the JSON content after the colon
-   - Return it as PURE JSON (not as a string, not escaped, not in code blocks)
-   - Do NOT add any text before or after the JSON
-   - Return the raw JSON object exactly as it appears
+**Core Rules:**
+1. When tools return "X_RESULT:" format, extract JSON after colon and return it directly
+2. For dates without years: use current year if month/day is ahead, next year if passed
+3. Convert city names to airport codes (LOS=Lagos, DXB=Dubai, LHR=London, etc.)
 
-Your comprehensive capabilities:
-- **Flights**: Search for flights between cities using Mistifly (search_flights)
-- **Tours & Activities**: Search for tours and activities using Viator (search_viator_tours)
-- **Places**: Find hotels, restaurants, and landmarks using Google Places (search_places)
-- **Complete Trip Planning**: Combine all three services for comprehensive travel recommendations
+**Tools:**
+- search_flights: Find flights between cities
+- search_viator_tours: Find tours/activities  
+- search_places: Find hotels/restaurants/landmarks
+- book_flight: Book selected flight with passenger details
 
-MANDATORY workflow for different queries:
-1. Flight queries ("find me flights to Dubai", "book a ticket to London"):
-   - ALWAYS use search_flights with proper IATA codes
-   - For common cities, you know the codes (LOS=Lagos, DXB=Dubai, LHR=London, JFK=New York, etc.)
-   
-2. Tour/activity queries ("tours in Rome", "what to do in Paris"):
-   - ALWAYS use search_viator_tours
-   
-3. Place queries ("hotels near Eiffel Tower", "restaurants in Rome"):
-   - ALWAYS use search_places
-   
-4. Complete trip planning ("plan a trip to Dubai", "I'm visiting London for a week"):
-   - Use search_flights for transportation
-   - Use search_viator_tours for activities
-   - Use search_places for accommodations and dining
-   - Combine all results into one comprehensive response
-
-Expected response formats:
-
-For flight searches:
-{{{{
-  "success": true/false,
-  "message": "description",
-  "flights": [array of flight objects with airline, price, duration, stops],
-  "search_params": {{{{origin, destination, dates}}}}
-}}}}
-
-For tour searches:
-{{{{
-  "success": true/false,
-  "message": "description",
-  "tours": [array of tour objects],
-  "destination": {{{{"name": "destination"}}}}
-}}}}
-
-For place searches:
-{{{{
-  "success": true/false,
-  "message": "description",
-  "places": [array of place objects]
-}}}}
-
-For combined trip planning:
-{{{{
-  "success": true,
-  "message": "Complete trip plan",
-  "flights": [flights array],
-  "tours": [tours array],
-  "places": [places array],
-  "destination": "destination name"
-}}}}
-
-Important guidelines:
-- ALWAYS search APIs before giving advice
-- For flight searches, convert city names to IATA codes automatically
-- When users want to book flights, explain they need to provide passenger details
-- Maintain conversation context using chat history
-- Be proactive: if someone asks about a destination, offer flights, tours, AND places
-- ALWAYS return pure JSON when tools return *_RESULT formatted responses
+**For flight queries:** Use search_flights with IATA codes and YYYY-MM-DD dates
+**For tour queries:** Use search_viator_tours with destination name
+**For place queries:** Use search_places with descriptive query
+**For complex planning:** Combine multiple tools as needed
 
 Be helpful and provide comprehensive travel solutions!"""),
     ("placeholder", "{chat_history}"),
@@ -539,11 +535,10 @@ default_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 def create_executor_with_memory(session_id: str = None) -> AgentExecutor:
     """Create an executor with Django-based memory for a specific session."""
     if session_id:
-        memory = DjangoConversationMemory(session_id=session_id, max_history_length=20)
+        memory = DjangoConversationMemory(session_id=session_id, max_history_length=5)
         return AgentExecutor(agent=agent, tools=tools, verbose=True, memory=memory)
     else:
-        memory = ConversationBufferWindowMemory(memory_key="chat_history", return_messages=True, k=20)
+        memory = ConversationBufferWindowMemory(memory_key="chat_history", return_messages=True, k=5)
         return AgentExecutor(agent=agent, tools=tools, verbose=True, memory=memory)
-
 
 executor = default_executor

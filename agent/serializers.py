@@ -2,7 +2,16 @@
 from rest_framework import serializers
 from datetime import date
 # UPDATE THIS LINE - Add the new models:
-from .models import Conversation, Message, Tour, FlightBooking, FlightSearch, Place
+from .models import (
+    Conversation, 
+    Message, 
+    Tour, 
+    FlightBooking,  # ← This was missing!
+    Payment,
+    WebhookLog,
+    FlightSearch, 
+    Place
+)
 
 
 # ================================================================
