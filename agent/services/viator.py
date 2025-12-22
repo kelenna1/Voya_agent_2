@@ -1,4 +1,4 @@
-# agent/services/viator.py
+# agent/services/viator.py - ENHANCED CACHING VERSION
 import os
 import requests
 import time
@@ -7,8 +7,13 @@ from dotenv import load_dotenv
 from typing import List, Dict, Optional
 from functools import wraps
 import json
+from django.core.cache import cache, caches
+import hashlib
+from django.conf import settings
+import logging
 
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 
 class ViatorAPIError(Exception):
@@ -30,7 +35,7 @@ def retry_on_rate_limit(max_retries=3, backoff_factor=2):
                 except ViatorAPIError as e:
                     if e.status_code == 429 and attempt < max_retries - 1:
                         wait_time = backoff_factor ** attempt
-                        print(f"[Rate Limit] Retrying in {wait_time}s...")
+                        logger.warning(f"[Viator] Rate limit hit, retrying in {wait_time}s...")
                         time.sleep(wait_time)
                     else:
                         raise
@@ -48,21 +53,31 @@ class ViatorService:
         "Content-Type": "application/json",
         "Accept-Language": "en-US"
     }
+    
+    # Cache configuration
+    CACHE_TTL_SEARCH = 60 * 60      # 60 minutes — tours change very slowly
+    CACHE_TTL_DESTINATIONS = 60 * 60 * 24  # 24 hours
+    CACHE_TTL_PRODUCT_DETAILS = 60 * 30  # 30 minutes
+    CACHE_TTL_AVAILABILITY = 60 * 10  # 10 minutes (availability changes faster)
 
     def __init__(self):
         if not self.HEADERS["exp-api-key"]:
             raise ValueError("Missing VIATOR_API_KEY in environment variables. Please set VIATOR_API_KEY in your .env file.")
+        
         self.destinations_cache = None
+        # Use api_cache for faster responses
+        self.api_cache = caches['api_cache']
 
-    # ------------------------------------------------------------------
+    # ================================================================
     # API REQUEST WRAPPER
-    # ------------------------------------------------------------------
+    # ================================================================
     @retry_on_rate_limit()
     def _make_request(self, method: str, endpoint: str,
                       params: Dict = None, json: Dict = None) -> Optional[Dict]:
         """Make a Viator API request with error handling and retries."""
         url = f"{self.BASE_URL.rstrip('/')}/{endpoint.lstrip('/')}"
         try:
+            logger.debug(f"[Viator] {method} {endpoint}")
             response = requests.request(
                 method, url,
                 headers=self.HEADERS,
@@ -71,158 +86,160 @@ class ViatorService:
                 timeout=30
             )
             
-            # Check for errors before raising
             if not response.ok:
-                # Debug output (uncomment for troubleshooting)
-                # print(f"DEBUG: Response status: {response.status_code}")
-                # print(f"DEBUG: Response headers: {dict(response.headers)}")
-                # print(f"DEBUG: Response content: {response.text}")
+                logger.error(f"[Viator] API error {response.status_code}: {response.text[:200]}")
                 raise ViatorAPIError(response.status_code, response.text)
             
             return response.json()
 
         except requests.exceptions.Timeout:
+            logger.error(f"[Viator] Timeout for endpoint '{endpoint}'")
             raise ViatorAPIError(408, f"Request timeout for endpoint '{endpoint}'")
         except ViatorAPIError:
-            # Re-raise our custom errors
             raise
         except requests.exceptions.RequestException as e:
-            status = e.response.status_code if e.response else 0
+            status_code = e.response.status_code if e.response else 0
             message = e.response.text if e.response else str(e)
-            # Debug output (uncomment for troubleshooting)
-            # print(f"DEBUG: Request failed - URL: {url}, Status: {status}, Message: {message}")
-            raise ViatorAPIError(status, message)
+            logger.error(f"[Viator] Request failed: {message[:200]}")
+            raise ViatorAPIError(status_code, message)
 
-    # ------------------------------------------------------------------
-    # DESTINATIONS
-    # ------------------------------------------------------------------
+    # ================================================================
+    # DESTINATIONS - CACHED
+    # ================================================================
     def get_destinations(self) -> List[Dict]:
-        """Fetch destinations (GET /destinations). Cache for efficiency."""
-        if self.destinations_cache is None:
-            response = self._make_request("GET", "destinations")
+        """Get all Viator destinations - cached for 24 hours."""
+        # Check in-memory cache first (fastest)
+        if self.destinations_cache is not None:
+            logger.debug("[Viator] Using in-memory destinations cache")
+            return self.destinations_cache
 
-            if not response:
-                raise ViatorAPIError(500, "Empty response from Viator /destinations endpoint.")
+        # Check Redis cache
+        cache_key = "viator:destinations"
+        cached = self.api_cache.get(cache_key)
+        if cached is not None:
+            logger.info("[Cache HIT] Viator destinations")
+            self.destinations_cache = cached
+            return cached
 
-            # DEBUG: print the top-level keys once (uncomment for debugging)
-            # print(f"DEBUG: /destinations response keys -> {list(response.keys())}")
-
-            # Handle the different possible response structures
-            if isinstance(response, list):
-                # Some versions return a direct list
-                self.destinations_cache = response
-
-            elif isinstance(response, dict):
-                # Case 1: Viator production often returns {"destinations": [...]}
-                if "destinations" in response:
-                    self.destinations_cache = response["destinations"]
-
-                # Case 2: Some versions wrap in {"data": {"destinations": [...]}}
-                elif "data" in response and isinstance(response["data"], dict) and "destinations" in response["data"]:
-                    self.destinations_cache = response["data"]["destinations"]
-
-                # Case 3: Some versions return {"data": [...]}
-                elif "data" in response and isinstance(response["data"], list):
-                    self.destinations_cache = response["data"]
-
-                else:
-                    raise ViatorAPIError(500, f"Unexpected /destinations format: {response}")
+        logger.info("[Cache MISS] Fetching Viator destinations from API...")
+        response = self._make_request("GET", "destinations")
+        
+        # Parse response (handle different formats)
+        if isinstance(response, list):
+            destinations = response
+        elif isinstance(response, dict):
+            if "destinations" in response:
+                destinations = response["destinations"]
+            elif "data" in response and isinstance(response["data"], dict) and "destinations" in response["data"]:
+                destinations = response["data"]["destinations"]
+            elif "data" in response and isinstance(response["data"], list):
+                destinations = response["data"]
             else:
-                raise ViatorAPIError(500, "Unexpected destination response type.")
+                raise ViatorAPIError(500, f"Unexpected /destinations format: {response}")
+        else:
+            raise ViatorAPIError(500, "Unexpected destination response type.")
 
-        return self.destinations_cache
-
-
+        # Cache for 24 hours
+        self.api_cache.set(cache_key, destinations, timeout=self.CACHE_TTL_DESTINATIONS)
+        self.destinations_cache = destinations
+        logger.info(f"[Viator] Cached {len(destinations)} destinations for 24h")
+        return destinations
 
     def resolve_destination(self, name: str) -> str:
-        """Resolve destination name to its Viator ID (strict match only)."""
+        """Resolve destination name to its Viator ID - uses cached destinations."""
+        # Build cache key for resolved destination
+        cache_key = f"viator:dest_id:{name.lower().strip()}"
+        
+        # Check if we've already resolved this destination
+        cached_id = self.api_cache.get(cache_key)
+        if cached_id:
+            logger.debug(f"[Cache HIT] Destination ID for '{name}': {cached_id}")
+            return cached_id
+        
+        # Resolve from destinations list (which is cached)
         destinations = self.get_destinations()
         name_lower = name.lower()
 
+        # Exact match first
         match = next((d for d in destinations if d.get("name", "").lower() == name_lower), None)
+        
+        # Partial match fallback
         if not match:
             match = next((d for d in destinations if name_lower in d.get("name", "").lower()), None)
 
         if not match:
             raise ViatorAPIError(404, f"Destination '{name}' not found in Viator database.")
-        return int(match.get("destinationId"))
+        
+        dest_id = int(match.get("destinationId"))
+        
+        # Cache the resolved ID for 24 hours
+        self.api_cache.set(cache_key, dest_id, timeout=self.CACHE_TTL_DESTINATIONS)
+        logger.info(f"[Viator] Resolved '{name}' → ID {dest_id}")
+        return dest_id
 
-    # ------------------------------------------------------------------
-    # TOUR SEARCH
-    # ------------------------------------------------------------------
+    # ================================================================
+    # TOUR SEARCH - ENHANCED CACHING
+    # ================================================================
     def search_tours(self, query: Optional[str], destination: str,
                      start_date: Optional[str] = None, page_size: int = 5) -> List[Dict]:
-        """Search for tours by query and destination."""
-        if not start_date:
-            # Use today's date, but ensure it's not in the past
-            today = datetime.now().strftime("%Y-%m-%d")
+        """Search for tours — fully cached by destination + date range + page_size."""
+        
+        # Normalize inputs
+        destination_norm = destination.strip().title()
+        page_size = min(page_size, 20)  # safety limit
+        today = datetime.now().strftime("%Y-%m-%d")
+        start_date = start_date or today
+
+        # Parse and fix start_date
+        try:
+            start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
+            if start_date_obj.date() < datetime.now().date():
+                start_date_obj = datetime.now()
+                start_date = start_date_obj.strftime("%Y-%m-%d")
+        except:
             start_date = today
-        
-        # Parse the start date and ensure it's not in the past
-        start_date_obj = datetime.strptime(start_date, "%Y-%m-%d")
-        today_obj = datetime.now().date()
-        
-        # If the provided start_date is in the past, use today's date instead
-        if start_date_obj.date() < today_obj:
             start_date_obj = datetime.now()
-            start_date = start_date_obj.strftime("%Y-%m-%d")
-        
-        # Calculate end_date from start_date (not from now!)
+
         end_date = (start_date_obj + timedelta(days=30)).strftime("%Y-%m-%d")
 
-        dest_id = self.resolve_destination(destination)
+        # Resolve destination ID (uses cached destinations)
+        dest_id = self.resolve_destination(destination_norm)
 
-        endpoint = "products/search"
+        # BUILD CACHE KEY
+        cache_parts = f"{destination_norm}|{start_date}|{end_date}|{page_size}"
+        cache_key = f"viator:tours:{hashlib.md5(cache_parts.encode()).hexdigest()}"
 
-        
+        # TRY CACHE FIRST
+        cached = self.api_cache.get(cache_key)
+        if cached is not None:
+            logger.info(f"[Cache HIT] Viator tours in {destination_norm}")
+            return cached
+
+        logger.info(f"[Cache MISS] Calling Viator API for tours in {destination_norm}")
+
+        # API payload
         payload = {
             "filtering": {
                 "destination": str(dest_id),
                 "startDate": start_date,
                 "endDate": end_date,
                 "highestPrice": 10000,
-                "durationInMinutes": {
-                    "from": 0,
-                    "to": 1000
-                },
-                "rating": {
-                    "from": 0,
-                    "to": 5
-                }
+                "durationInMinutes": {"from": 0, "to": 1000},
+                "rating": {"from": 0, "to": 5}
             },
             "productSorting": {
-                "sort": "PRICE",
+                "sort": "PRICE", 
                 "order": "ASCENDING"
             },
             "searchTypes": [
-                {
-                    "searchType": "PRODUCTS",
-                    "pagination": {
-                        "start": 1,
-                        "count": page_size
-                    }
-                }
+                {"searchType": "PRODUCTS", "pagination": {"start": 1, "count": page_size}}
             ],
             "currency": "USD"
         }
-        
 
-        # Debug output (uncomment for troubleshooting)
-        # print(f"DEBUG: Making request to {endpoint} with payload: {payload}")
-        # print(f"\n{'='*60}")
-        # print(f"DEBUG: Destination '{destination}' resolved to ID: {dest_id} (type: {type(dest_id)})")
-        # print(f"DEBUG: Start date: {start_date}")
-        # print(f"DEBUG: End date: {end_date}")
-        # print(f"DEBUG: Full payload being sent to Viator:")
-        # print(json.dumps(payload, indent=2))
-        # print(f"{'='*60}\n")
-
-        data = self._make_request("POST", endpoint, json=payload)
+        data = self._make_request("POST", "products/search", json=payload)
         
-        if not data:
-            raise ViatorAPIError(404, f"No response received for search in {destination}.")
-        
-        # Handle different response structures
+        # Parse response
         tours_data = None
         if "data" in data:
             tours_data = data["data"]
@@ -231,22 +248,38 @@ class ViatorService:
         elif "products" in data:
             tours_data = data["products"]
         else:
-            # print(f"DEBUG: Unexpected response structure: {list(data.keys()) if isinstance(data, dict) else type(data)}")
-            raise ViatorAPIError(404, f"No tours found for '{query}' in {destination}. Response: {data}")
-        
-        if not tours_data:
-            raise ViatorAPIError(404, f"No tours found for '{query}' in {destination}.")
-        
-        return self._format_tours(tours_data)
+            result = []
+            # Cache empty result for shorter time
+            self.api_cache.set(cache_key, result, timeout=60 * 5)
+            logger.info(f"[Viator] No tours found for {destination_norm}")
+            return result
 
-    # ------------------------------------------------------------------
-    # PRODUCT DETAILS
-    # ------------------------------------------------------------------
+        result = self._format_tours(tours_data)
+
+        # CACHE FOR 60 MINUTES
+        self.api_cache.set(cache_key, result, timeout=self.CACHE_TTL_SEARCH)
+        logger.info(f"[Viator] Found {len(result)} tours, cached for {self.CACHE_TTL_SEARCH}s")
+        return result
+
+    # ================================================================
+    # PRODUCT DETAILS - CACHED
+    # ================================================================
     def get_product_details(self, product_code: str) -> Dict:
-        """Fetch detailed product information."""
+        """Fetch detailed product information - cached for 30 minutes."""
+        cache_key = f"viator:product:{product_code}"
+        
+        # Try cache first
+        cached = self.api_cache.get(cache_key)
+        if cached:
+            logger.info(f"[Cache HIT] Product details for {product_code}")
+            return cached
+        
+        logger.info(f"[Cache MISS] Fetching product {product_code}")
+        
         data = self._make_request("GET", f"products/{product_code}")
         product = data.get("data", data)
-        return {
+        
+        formatted = {
             "code": product.get("productCode", ""),
             "title": product.get("title", ""),
             "description": product.get("description", ""),
@@ -261,26 +294,48 @@ class ViatorService:
             "exclusions": product.get("exclusions", []),
             "cancellationPolicy": product.get("cancellationPolicy", {}).get("description", "")
         }
+        
+        # Cache for 30 minutes
+        self.api_cache.set(cache_key, formatted, timeout=self.CACHE_TTL_PRODUCT_DETAILS)
+        logger.info(f"[Viator] Product {product_code} cached")
+        return formatted
 
-    # ------------------------------------------------------------------
-    # AVAILABILITY
-    # ------------------------------------------------------------------
+    # ================================================================
+    # AVAILABILITY - SHORT CACHE
+    # ================================================================
     def check_availability(self, product_code: str) -> Dict:
-        """Check availability for a specific tour."""
+        """Check availability for a specific tour - cached for 10 minutes."""
+        cache_key = f"viator:avail:{product_code}"
+        
+        # Try cache first
+        cached = self.api_cache.get(cache_key)
+        if cached:
+            logger.info(f"[Cache HIT] Availability for {product_code}")
+            return cached
+        
+        logger.info(f"[Cache MISS] Checking availability for {product_code}")
+        
         data = self._make_request("GET", f"availability/schedules/{product_code}")
         if not data or "schedules" not in data:
             raise ViatorAPIError(404, f"No availability found for product {product_code}.")
-        return {"product_code": product_code, "schedules": data["schedules"][:10]}
+        
+        result = {"product_code": product_code, "schedules": data["schedules"][:10]}
+        
+        # Cache for 10 minutes (availability changes more frequently)
+        self.api_cache.set(cache_key, result, timeout=self.CACHE_TTL_AVAILABILITY)
+        logger.info(f"[Viator] Availability for {product_code} cached")
+        return result
 
-    # ------------------------------------------------------------------
+    # ================================================================
     # HELPERS
-    # ------------------------------------------------------------------
+    # ================================================================
     def _format_tours(self, tours: List[Dict]) -> List[Dict]:
         """Format raw tour data into standardized output."""
         formatted = []
         for item in tours:
             images = item.get("images", [])
             thumbnail = images[0].get("url", "") if images else ""
+            
             # Get or create URL
             web_url = item.get("webUrl", "")
             if not web_url and item.get("productCode"):
@@ -304,20 +359,57 @@ class ViatorService:
             return url
         return f"{url}{'&' if '?' in url else '?'}pid={self.AFFILIATE_ID}&mcid=42383"
 
+    # ================================================================
+    # CACHE MANAGEMENT
+    # ================================================================
+    @classmethod
+    def clear_cache(cls, destination: str = None, product_code: str = None):
+        """Clear Viator cache, optionally filtered."""
+        api_cache = caches['api_cache']
+        
+        if product_code:
+            keys_to_clear = [
+                f"viator:product:{product_code}",
+                f"viator:avail:{product_code}"
+            ]
+            for key in keys_to_clear:
+                api_cache.delete(key)
+                logger.info(f"[Viator] Cleared cache for {key}")
+        
+        elif destination:
+            # Would need Redis SCAN for pattern matching
+            logger.warning(f"[Viator] Destination-specific cache clear requires Redis SCAN")
+        
+        else:
+            logger.warning("[Viator] Full cache clear not recommended")
+    
+    @classmethod
+    def get_cache_stats(cls):
+        """Get cache statistics."""
+        return {
+            'service': 'viator',
+            'cache_backend': 'redis',
+            'cache_alias': 'api_cache',
+            'ttl_search': cls.CACHE_TTL_SEARCH,
+            'ttl_destinations': cls.CACHE_TTL_DESTINATIONS,
+            'ttl_product_details': cls.CACHE_TTL_PRODUCT_DETAILS,
+            'ttl_availability': cls.CACHE_TTL_AVAILABILITY,
+        }
 
-# ------------------------------------------------------------------
+
+# ================================================================
 # TEST SCRIPT
-# ------------------------------------------------------------------
+# ================================================================
 if __name__ == "__main__":
     service = ViatorService()
-    print("=== Viator Production Test ===")
+    logger.info("=== Viator Enhanced Caching Test ===")
 
     for city in ["Rome", "Paris", "London"]:
         try:
-            print(f"\nSearching tours in {city}...")
+            logger.info(f"\n--- Searching tours in {city} ---")
             tours = service.search_tours("sightseeing", city, page_size=3)
-            print(f"Found {len(tours)} tours.")
+            logger.info(f" Found {len(tours)} tours.")
             for t in tours[:2]:
-                print(f"- {t['title']} (${t['price']}) [{t['rating']}*]")
+                logger.info(f"  - {t['title']} (${t['price']}) [{t['rating']}★]")
         except ViatorAPIError as e:
-            print(f"[Error] {e}")
+            logger.error(f" Error: {e}")

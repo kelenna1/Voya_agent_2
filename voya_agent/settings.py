@@ -13,7 +13,7 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 from pathlib import Path
 import os
 import sys
-from dotenv import load_dotenv
+from dotenv import load_dotenv  
 load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -29,7 +29,7 @@ SECRET_KEY = 'django-insecure-wcpl7rs$=uz&f!6n824__&8=fdnz9ng@a94ai1mwnrin2i+2i+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ["voya-agent-j9zu.onrender.com", "127.0.0.1", "localhost"]
+ALLOWED_HOSTS = ["voya-agent-j9zu.onrender.com", "127.0.0.1", "localhost", "fe39185946c0.ngrok-free.app", "36d6a1aad490.ngrok-free.app"]
 
 
 
@@ -148,7 +148,10 @@ CORS_ALLOWED_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
-    "https://voya-agent-j9zu.onrender.com"
+    "https://voya-agent-j9zu.onrender.com",
+    "https://fe39185946c0.ngrok-free.app",
+    "https://36d6a1aad490.ngrok-free.app",
+
 ]
 
 CORS_ALLOW_CREDENTIALS = True
@@ -180,14 +183,6 @@ DATABASES = {
         'CONN_MAX_AGE': 600,
     }
 }
-
-# Debug database configuration
-print(f"🔍 Database Configuration:")
-print(f"   Host: {DATABASES['default']['HOST']}")
-print(f"   Port: {DATABASES['default']['PORT']}")
-print(f"   User: {DATABASES['default']['USER']}")
-print(f"   Database: {DATABASES['default']['NAME']}")
-print(f"   SSL Mode: {DATABASES['default']['OPTIONS']['sslmode']}")
 
 # Logging configuration
 LOGGING = {
@@ -229,7 +224,181 @@ LOGGING = {
         },
     },
 }
+
+
+# Add these to your voya_agent/settings.py 
+
 import os
+from pathlib import Path
+
+# ================================================================
+# REDIS CONFIGURATION
+# ================================================================
+
+#Build from components
+REDIS_HOST = os.getenv('REDIS_HOST', 'redis-10930.crce220.us-east-1-4.ec2.cloud.redislabs.com')
+REDIS_PORT = int(os.getenv('REDIS_PORT', 10930))
+REDIS_DB = int(os.getenv('REDIS_DB', 0))
+REDIS_PASSWORD = os.getenv('REDIS_PASSWORD')
+REDIS_URL = os.getenv('REDIS_URL')
+
+# ================================================================
+# DJANGO CACHE CONFIGURATION (Using Redis)
+# ================================================================
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': REDIS_URL,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'PASSWORD': REDIS_PASSWORD,
+            'CONNECTION_POOL_KWARGS': {
+                'max_connections': 50,
+                'retry_on_timeout': True,
+            },
+            'SOCKET_CONNECT_TIMEOUT': 5,
+            'SOCKET_TIMEOUT': 5,
+        },
+        'KEY_PREFIX': 'voya',  # Prefix all cache keys with 'voya:'
+        'TIMEOUT': 60 * 30,  # Default timeout: 30 minutes
+    },
+    # Separate cache for sessions (optional but recommended)
+    'sessions': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': REDIS_URL,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'PASSWORD': REDIS_PASSWORD,
+        },
+        'KEY_PREFIX': 'voya_session',
+        'TIMEOUT': 60 * 60 * 24,  # 24 hours
+    },
+    # Cache for external API responses (short TTL)
+    'api_cache': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': REDIS_URL,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'PASSWORD': REDIS_PASSWORD,
+        },
+        'KEY_PREFIX': 'voya_api',
+        'TIMEOUT': 60 * 5,  # 5 minutes for API responses
+    },
+}
+
+# Use Redis for session storage (optional but recommended)
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_CACHE_ALIAS = 'sessions'
+
+# ================================================================
+# CELERY CONFIGURATION
+# ================================================================
+
+# Celery Broker (Redis)
+CELERY_BROKER_URL = REDIS_URL
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+
+# Celery Result Backend (Redis + Database)
+CELERY_RESULT_BACKEND = REDIS_URL
+CELERY_RESULT_BACKEND_ALWAYS_RETRY = True
+CELERY_RESULT_BACKEND_MAX_RETRIES = 10
+
+# Store task results in database for persistence
+CELERY_RESULT_EXTENDED = True
+DJANGO_CELERY_RESULTS_TASK_ID_MAX_LENGTH = 191
+
+# Task serialization
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_ACCEPT_CONTENT = ['json']
+
+# Timezone
+CELERY_TIMEZONE = 'UTC'
+CELERY_ENABLE_UTC = True
+
+# Task execution settings
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes max per task
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # Soft limit at 25 minutes
+CELERY_TASK_ACKS_LATE = True  # Acknowledge tasks after completion
+CELERY_WORKER_PREFETCH_MULTIPLIER = 4  # Prefetch 4 tasks per worker
+
+# Task result settings
+CELERY_TASK_IGNORE_RESULT = False  # Store results by default
+CELERY_RESULT_EXPIRES = 60 * 60 * 24  # Results expire after 24 hours
+
+# Error handling
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_TASK_DEFAULT_RETRY_DELAY = 60  # 1 minute retry delay
+
+# Worker settings
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000  # Restart worker after 1000 tasks
+CELERY_WORKER_DISABLE_RATE_LIMITS = False
+
+# Monitoring
+CELERY_SEND_TASK_SENT_EVENT = True  # Track task lifecycle
+CELERY_TASK_SEND_SENT_EVENT = True
+
+# Beat scheduler (for periodic tasks)
+CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+
+# ================================================================
+# CACHE KEY PREFIXES (for organization)
+# ================================================================
+
+CACHE_KEY_PREFIXES = {
+    'mistifly_session': 'mistifly_auth_token',
+    'mistifly_search': 'mistifly_search:',
+    'viator_search': 'viator_search:',
+    'viator_destination': 'viator_dest:',
+    'google_places': 'places:',
+    'conversation': 'conv:',
+    'agent_memory': 'agent_mem:',
+}
+
+# ================================================================
+# LOGGING (Add Redis/Celery logging)
+# ================================================================
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'file': {
+            'class': 'logging.FileHandler',
+            'filename': 'logs/voya.log',
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+        },
+        'celery': {
+            'handlers': ['console', 'file'],
+            'level': 'INFO',
+        },
+        'agent': {
+            'handlers': ['console', 'file'],
+            'level': 'DEBUG',
+        },
+    },
+}
 
 LOG_DIR = os.path.join(BASE_DIR, "logs")
 os.makedirs(LOG_DIR, exist_ok=True)
+
+
+
