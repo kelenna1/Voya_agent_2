@@ -1,4 +1,4 @@
-# agent/agent.py - FIXED VERSION
+# agent/agent.py - CLEAN VERSION with Simple Date Normalizer
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain.agents import create_tool_calling_agent, AgentExecutor
@@ -23,6 +23,41 @@ places = GooglePlacesService()
 mistifly = MistiflyService()
 
 # ================================================================
+# GLOBAL DATE NORMALIZER - ONE FUNCTION TO RULE THEM ALL
+# ================================================================
+
+def normalize_future_date(date_str: str) -> str:
+    """
+    Normalize YYYY-MM-DD date so it is NEVER in the past.
+    - If year < current year → bump to current year
+    - If month/day already passed → bump to next year
+    
+    This is the ONLY date fixing function. Use it everywhere.
+    """
+    try:
+        parsed = datetime.strptime(date_str, "%Y-%m-%d")
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # Hard guard: never allow past years (fixes 2023 issue)
+        if parsed.year < today.year:
+            parsed = parsed.replace(year=today.year)
+
+        # If still in the past, roll forward by year
+        if parsed < today:
+            parsed = parsed.replace(year=parsed.year + 1)
+
+        normalized = parsed.strftime("%Y-%m-%d")
+        print(f"[Date Normalized] {date_str} → {normalized}")  # Debug line
+        return normalized
+
+    except Exception as e:
+        # Fail safe: default to 7 days from now
+        fallback = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+        print(f"[Date Normalize Failed] {date_str} → {fallback} (error: {e})")
+        return fallback
+
+
+# ================================================================
 # VIATOR TOOLS (Tours & Activities)
 # ================================================================
 
@@ -30,8 +65,13 @@ mistifly = MistiflyService()
 def search_viator_tours(query: str = "tour", destination: str = "Rome", date: str = None, limit: int = 5):
     """Search for tours based on query, destination, and date."""
     try:
-        if not date:
-            date = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+        # ✅ Apply date normalization
+        if date:
+            date = normalize_future_date(date)
+        else:
+            date = normalize_future_date(
+                (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+            )
         
         tours = viator.search_tours(query, destination, date, limit)
         
@@ -197,7 +237,7 @@ def get_place_info(place_id: str):
 
 
 # ================================================================
-# MISTIFLY TOOLS (Flights) - FIXED
+# MISTIFLY TOOLS (Flights) - SIMPLIFIED with normalize_future_date
 # ================================================================
 
 @tool
@@ -225,73 +265,20 @@ def search_flights(
         Structured JSON response with flights array
     """
     try:
-        # ✅ Date validation and auto-correction
-        try:
-            dep_date = datetime.strptime(departure_date, "%Y-%m-%d")
-            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            
-            # If departure is in the past, intelligently adjust
-            if dep_date < today:
-                # Extract month and day
-                target_month = dep_date.month
-                target_day = dep_date.day
-                
-                # Check if this month/day has passed this year
-                this_year_date = today.replace(month=target_month, day=target_day)
-                
-                if this_year_date >= today:
-                    # Month/day is still ahead this year - use this year
-                    dep_date = this_year_date
-                    print(f"[Date Fix] Adjusted to this year: {dep_date.strftime('%Y-%m-%d')}")
-                else:
-                    # Month/day already passed this year - use next year
-                    dep_date = this_year_date.replace(year=today.year + 1)
-                    print(f"[Date Fix] Adjusted to next year: {dep_date.strftime('%Y-%m-%d')}")
-                
-                departure_date = dep_date.strftime("%Y-%m-%d")
-            
-            # If departure is more than 2 years in the future, normalize
-            elif (dep_date - today).days > 730:  # 2 years
-                target_month = dep_date.month
-                target_day = dep_date.day
-                this_year_date = today.replace(month=target_month, day=target_day)
-                
-                if this_year_date >= today:
-                    dep_date = this_year_date
-                else:
-                    dep_date = this_year_date.replace(year=today.year + 1)
-                
-                departure_date = dep_date.strftime("%Y-%m-%d")
-                print(f"[Date Fix] Far future normalized to {departure_date}")
-            
-            # Same logic for return date
-            if return_date:
-                ret_date = datetime.strptime(return_date, "%Y-%m-%d")
-                
-                # Return must be after departure
-                if ret_date <= dep_date:
-                    target_month = ret_date.month
-                    target_day = ret_date.day
-                    
-                    # Try same year as departure first
-                    try:
-                        same_year = dep_date.replace(month=target_month, day=target_day)
-                        if same_year > dep_date:
-                            ret_date = same_year
-                        else:
-                            ret_date = same_year.replace(year=dep_date.year + 1)
-                    except ValueError:
-                        # Invalid date (like Feb 30), use next valid date
-                        ret_date = dep_date + timedelta(days=7)
-                    
-                    return_date = ret_date.strftime("%Y-%m-%d")
-                    print(f"[Date Fix] Return adjusted to {return_date}")
-                    
-        except ValueError as e:
-            # If date parsing fails, let Mistifly handle it
-            print(f"[Date Warning] Could not parse dates: {e}")
-            pass
+        #Simple date normalization - that's it!
+        departure_date = normalize_future_date(departure_date)
         
+        if return_date:
+            return_date = normalize_future_date(return_date)
+            
+            # Ensure return is after departure
+            dep_dt = datetime.strptime(departure_date, "%Y-%m-%d")
+            ret_dt = datetime.strptime(return_date, "%Y-%m-%d")
+            
+            if ret_dt <= dep_dt:
+                ret_dt = dep_dt + timedelta(days=7)
+                return_date = ret_dt.strftime("%Y-%m-%d")
+                print(f"[Return Date Adjusted] Return was before/equal to departure, set to +7 days: {return_date}")
         
         # Search flights
         flights = mistifly.search_flights(
@@ -311,10 +298,28 @@ def search_flights(
                 "flights": []
             }
             result_str = f"FLIGHT_SEARCH_RESULT: {json.dumps(result)}"
-            print(f"[DEBUG] Returning (no flights): {result_str}")
             return result_str
         
-        # ✅ Inject search_params into EACH flight
+        # FORCE segment dates to align with normalized departure date
+        for flight in flights:
+            normalized_date = departure_date
+
+            # Fix top-level times if needed
+            if "departure_time" in flight:
+                flight["departure_time"] = normalized_date + flight["departure_time"][10:]
+            if "arrival_time" in flight:
+                flight["arrival_time"] = normalized_date + flight["arrival_time"][10:]
+
+            # Fix segment-level times (THIS is the real issue)
+            for segment in flight.get("segments", []):
+                if "dep" in segment:
+                    segment["dep"] = normalized_date + segment["dep"][10:]
+                if "arr" in segment:
+                    segment["arr"] = normalized_date + segment["arr"][10:]
+
+        
+        
+        # Inject search_params into EACH flight
         search_params = {
             "origin": origin.upper(),
             "destination": destination.upper(),
@@ -333,7 +338,6 @@ def search_flights(
             "search_params": search_params
         }
         result_str = f"FLIGHT_SEARCH_RESULT: {json.dumps(result)}"
-        print(f"[DEBUG] Returning (success): {result_str[:200]}...")
         return result_str
         
     except Exception as e:
@@ -347,7 +351,6 @@ def search_flights(
             "flights": []
         }
         result_str = f"FLIGHT_SEARCH_RESULT: {json.dumps(result)}"
-        print(f"[DEBUG] Returning (error): {result_str}")
         return result_str
 
 
@@ -481,16 +484,43 @@ def issue_ticket(order_id: str):
 
 
 # ================================================================
-# AGENT PROMPT
+# AGENT PROMPT - SIMPLIFIED (LLM doesn't need to worry about dates)
 # ================================================================
 
 prompt = ChatPromptTemplate.from_messages([
     ("system", """You are Avoya, a travel assistant helping users plan trips with flights, tours, and places.
 
+**CRITICAL: ALWAYS return responses in this EXACT JSON format:**
+
+For flight searches:
+{{
+    "success": true,
+    "message": "Found X flights",
+    "flights": [...],
+    "type": "flight_search"
+}}
+
+For tour searches:
+{{
+    "success": true,
+    "message": "Found X tours",
+    "tours": [...],
+    "destination": {{"name": "..."}},
+    "type": "tour_search"
+}}
+
+For place searches:
+{{
+    "success": true,
+    "message": "Found X places",
+    "places": [...],
+    "type": "place_search"
+}}
+
 **Core Rules:**
 1. When tools return "X_RESULT:" format, extract JSON after colon and return it directly
-2. For dates without years: use current year if month/day is ahead, next year if passed
-3. Convert city names to airport codes (LOS=Lagos, DXB=Dubai, LHR=London, etc.)
+2. For dates: Use YYYY-MM-DD format. When user says "next week", calculate the actual date. When user says "the 24th", determine which month they mean based on context.
+3. Convert city names to airport codes (LOS=Lagos, ABV=Abuja, DXB=Dubai, LHR=London, etc.)
 
 **Tools:**
 - search_flights: Find flights between cities

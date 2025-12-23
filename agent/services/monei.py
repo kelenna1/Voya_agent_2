@@ -28,7 +28,7 @@ class MoneiService:
     Docs: https://docs.monei.com/apis/rest/
     """
     
-    BASE_URL = "https://api.monei.com/v1"
+    BASE_URL = "https://api.monei.cc/v1"
     
     # Status mapping based on MONEI docs
     STATUS_MAP = {
