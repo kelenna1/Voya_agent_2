@@ -120,6 +120,19 @@ class ChatView(APIView):
             response_data['cached'] = False
             response_data['handler'] = 'agent' if classification['use_agent'] else 'direct'
             
+            # If the underlying handler/agent didn't set a `type`, infer it
+            if 'type' not in response_data:
+                q_type = classification.get('type')
+                if q_type == 'flight':
+                    response_data['type'] = 'flight_search'
+                elif q_type == 'tour':
+                    response_data['type'] = 'tour_search'
+                elif q_type == 'place':
+                    response_data['type'] = 'place_search'
+                else:
+                    # Fallback for generic/unknown queries
+                    response_data['type'] = 'conversational'
+            
             # Cache response for 5 minutes
             cache.set(cache_key, response_data, timeout=300)
             
@@ -144,6 +157,7 @@ class ChatView(APIView):
         input_hash = hashlib.md5(user_input.lower().strip().encode()).hexdigest()
         return f"chat_response:{session_id}:{input_hash}"
     
+
     def _handle_with_direct_handler(self, classification: dict, conversation) -> dict:
         """Handle simple queries with direct handlers (NO LLM)"""
         handlers = get_handlers()
@@ -152,27 +166,46 @@ class ChatView(APIView):
         
         try:
             if query_type == 'flight':
-                return handlers.handle_flight_search(params)
+                result = handlers.handle_flight_search(params)
             elif query_type == 'tour':
-                return handlers.handle_tour_search(params)
+                result = handlers.handle_tour_search(params)
             elif query_type == 'place':
-                return handlers.handle_place_search(params)
+                result = handlers.handle_place_search(params)
             else:
-                # Fallback to agent
+                # Unknown type - use agent
+                logger.warning(f"[Direct Handler] Unknown type '{query_type}' - using agent")
                 return self._handle_with_agent(
                     conversation.session_id,
-                    f"Search for {query_type}",
+                    conversation.messages.last().content if conversation.messages.exists() else "",
                     conversation
                 )
+            
+            # ✅ CHECK FOR FALLBACK FLAG
+            if result.get('_use_agent_fallback'):
+                logger.info(f"[Direct Handler] Fallback triggered: {result.get('reason')} - using agent")
+                # Get the original user message
+                user_message = conversation.messages.filter(message_type='user').last()
+                original_query = user_message.content if user_message else ""
+                
+                return self._handle_with_agent(
+                    conversation.session_id,
+                    original_query,
+                    conversation
+                )
+            
+            return result
+            
         except Exception as e:
-            logger.error(f"[DIRECT HANDLER] Error: {e}")
-            # Fallback to agent on error
-            return {
-                'success': False,
-                'message': f"Direct handler failed: {str(e)}. Please try rephrasing your query.",
-                'error': str(e)
-            }
-    
+            logger.error(f"[Direct Handler] Unexpected error: {e} - falling back to agent")
+            user_message = conversation.messages.filter(message_type='user').last()
+            original_query = user_message.content if user_message else ""
+            
+            return self._handle_with_agent(
+                conversation.session_id,
+                original_query,
+                conversation
+            )
+        
     def _handle_with_agent(self, session_id: str, user_input: str, conversation) -> dict:
         """Handle complex queries with LangChain agent"""
         # Create executor with REDUCED memory (5 instead of 20)
@@ -292,7 +325,8 @@ class FlightSearchView(APIView):
                 'success': True,
                 'message': f"Found {len(flights)} flights",
                 'flights': flights,
-                'search_params': search_params
+                'search_params': search_params,
+                'type': 'flight_search'
             }, status=status.HTTP_200_OK)
                 
         except Exception as e:

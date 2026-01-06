@@ -1,4 +1,4 @@
-# agent/utils/classifier.py
+# agent/utils/classifier.py - FIXED
 """
 Fast query classifier - NO LLM calls
 Determines if query is simple (flight/tour/place) or complex (needs agent)
@@ -12,8 +12,8 @@ from typing import Dict, Optional, List
 class QueryClassifier:
     """Classify user queries without using LLM"""
 
-    # IATA codes for common airports
-    AIRPORT_CODES = {
+    # Common airports - NOT exhaustive, just hints
+    COMMON_AIRPORTS = {
         'lagos': 'LOS', 'abuja': 'ABV', 'kano': 'KAN', 'port harcourt': 'PHC',
         'dubai': 'DXB', 'abu dhabi': 'AUH', 'doha': 'DOH', 'riyadh': 'RUH',
         'london': 'LHR', 'paris': 'CDG', 'rome': 'FCO', 'amsterdam': 'AMS',
@@ -40,7 +40,7 @@ class QueryClassifier:
     PLACE_PATTERNS = [
         r'\b(hotel|hotels|accommodation|stay|resort|hostel)\b',
         r'\b(restaurant|restaurants|cafe|bar|dining|eat|food)\b',
-        r'\b(near|close to|around|in|at)\b',
+        r'\b(near|close to|around)\b',
         r'\b(5[- ]?star|luxury|budget|cheap)\b'
     ]
 
@@ -102,13 +102,14 @@ class QueryClassifier:
 
         confidence = max_score / pattern_len
 
-        if missing:
+        # ✅ FIX: If extraction failed or looks wrong, use agent
+        if missing or cls._params_look_invalid(params, max_type):
             return {
                 'type': max_type,
                 'confidence': confidence,
                 'params': params,
-                'use_agent': True,
-                'reason': f'Missing required params: {missing}'
+                'use_agent': True,  # Let agent handle it
+                'reason': f'Params unclear or missing: {missing}'
             }
 
         return {
@@ -118,6 +119,27 @@ class QueryClassifier:
             'use_agent': False,
             'reason': 'All required params extracted'
         }
+
+    @classmethod
+    def _params_look_invalid(cls, params: Dict, query_type: str) -> bool:
+        """Check if extracted params look wrong"""
+        if query_type == 'tour':
+            dest = params.get('destination', '')
+            # Check if destination has weird patterns
+            if not dest or len(dest) < 3:
+                return True
+            # Check for leftover words like "to", "from", etc.
+            if any(word in dest.lower() for word in ['to ', ' to', 'from ', ' from']):
+                return True
+        
+        elif query_type == 'flight':
+            origin = params.get('origin')
+            dest = params.get('destination')
+            # If either is missing or invalid
+            if not origin or not dest or len(origin) != 3 or len(dest) != 3:
+                return True
+        
+        return False
 
     @classmethod
     def _is_complex_query(cls, query: str) -> bool:
@@ -160,44 +182,74 @@ class QueryClassifier:
 
         return params
 
-    # ===================== FIX #1 =====================
     @classmethod
     def _extract_tour_params(cls, query: str) -> Dict:
+        """Extract tour parameters - FIXED to handle edge cases"""
         params = {}
 
         destination = cls._extract_destination(query)
         if destination:
-            params['destination'] = destination
+            # Clean up the destination
+            destination = destination.strip()
+            
+            # Remove trailing prepositions/words
+            for suffix in [' to', ' from', ' in', ' at', ' on']:
+                if destination.endswith(suffix):
+                    destination = destination[:-len(suffix)].strip()
+            
+            # Only set if it's a valid city name
+            if len(destination) >= 3 and destination.replace(' ', '').isalpha():
+                params['destination'] = destination
+            else:
+                # Invalid destination - let agent handle it
+                params['destination'] = None
 
+        params['limit'] = 5
         return params
 
-    # ===================== FIX #2 =====================
     @classmethod
     def _extract_place_params(cls, query: str) -> Dict:
+        """Extract place parameters - FIXED"""
         params = {}
 
         destination = cls._extract_destination(query)
         if destination:
-            params['query'] = destination
+            # Clean up
+            destination = destination.strip()
+            for suffix in [' to', ' from', ' in', ' at']:
+                if destination.endswith(suffix):
+                    destination = destination[:-len(suffix)].strip()
+            
+            if len(destination) >= 3:
+                params['query'] = destination
+            else:
+                params['query'] = query  # fallback to full query
         else:
-            params['query'] = query  # fallback
+            params['query'] = query
 
+        params['limit'] = 5
         return params
 
     @classmethod
     def _extract_route(cls, query: str) -> tuple:
+        """Extract flight route - MORE STRICT"""
         patterns = [
-            r'from\s+([a-z\s]+?)\s+to\s+([a-z\s]+?)(?:\s+on|\s+for|\s+return|$)',
-            r'([a-z\s]+?)\s+to\s+([a-z\s]+?)(?:\s+on|\s+for|$)',
-            r'([a-z\s]+?)\s*→\s*([a-z\s]+)',
-            r'([a-z\s]+?)\s*->\s*([a-z\s]+)'
+            # "from X to Y"
+            r'from\s+([a-z\s]+?)\s+to\s+([a-z\s]+?)(?:\s+on|\s+for|\s+return|\s+next|\s+tomorrow|\s*$)',
+            # "X to Y"
+            r'\b([a-z\s]+?)\s+to\s+([a-z\s]+?)(?:\s+on|\s+for|\s+next|\s+tomorrow|\s*$)',
         ]
 
         for pattern in patterns:
             match = re.search(pattern, query)
             if match:
-                origin = cls._to_airport_code(match.group(1))
-                destination = cls._to_airport_code(match.group(2))
+                origin_text = match.group(1).strip()
+                dest_text = match.group(2).strip()
+                
+                # Try to convert to airport codes
+                origin = cls._to_airport_code(origin_text)
+                destination = cls._to_airport_code(dest_text)
+                
                 if origin and destination:
                     return origin, destination
 
@@ -205,23 +257,39 @@ class QueryClassifier:
 
     @classmethod
     def _to_airport_code(cls, city: str) -> Optional[str]:
+        """Convert city name to airport code - MORE FLEXIBLE"""
         city = city.lower().strip()
+        
+        # If already a 3-letter code
         if len(city) == 3 and city.isalpha():
             return city.upper()
-        return cls.AIRPORT_CODES.get(city)
+        
+        # Check common airports
+        if city in cls.COMMON_AIRPORTS:
+            return cls.COMMON_AIRPORTS[city]
+        
+        # ✅ If not in our list, return None (let agent handle it)
+        return None
 
     @classmethod
     def _extract_destination(cls, query: str) -> Optional[str]:
+        """Extract destination for tours/places - FIXED TO BE MORE PRECISE"""
+        # Try multiple patterns in order of specificity
         patterns = [
-            r'in\s+([a-z]+(?:\s+[a-z]+)?)',
-            r'to\s+([a-z]+(?:\s+[a-z]+)?)',
-            r'at\s+([a-z]+(?:\s+[a-z]+)?)'
+            # "in [City]" or "at [City]"
+            r'\b(?:in|at)\s+([a-z]+(?:\s+[a-z]+)?)\b',
+            # "to [City]" (but stop at prepositions)
+            r'\bto\s+([a-z]+)\b(?!\s+(?:see|do|visit|find|get))',
         ]
 
         for pattern in patterns:
             match = re.search(pattern, query)
             if match:
-                return match.group(1)
+                destination = match.group(1).strip()
+                
+                # Filter out common non-destinations
+                if destination not in ['see', 'do', 'get', 'find', 'go', 'visit', 'the']:
+                    return destination
 
         return None
 
