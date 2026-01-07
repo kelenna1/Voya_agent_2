@@ -516,6 +516,32 @@ For place searches:
     "places": [...],
     "type": "place_search"
 }}
+     
+For itineraries and trip plans:
+{{
+    "success": true,
+    "message": "Here is your 3-day itinerary for Lagos...",
+    "type": "itinerary",
+    "itinerary": [
+        {{
+            "day": 1,
+            "title": "Arrival and Culture",
+            "activities": [
+                "Arrive at LOS airport",
+                "Check into hotel",
+                "Visit Nike Art Gallery"
+            ]
+        }},
+        {{
+            "day": 2,
+            "title": "Beach Day",
+            "activities": [
+                "Morning at Landmark Beach",
+                "Lunch at Hard Rock Cafe"
+            ]
+        }}
+    ]
+}}
 
 **Core Rules:**
 1. When tools return "X_RESULT:" format, extract JSON after colon and return it directly
