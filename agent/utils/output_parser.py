@@ -138,6 +138,15 @@ class AgentOutputParser:
             normalized['type'] = 'place_search'
             normalized['places'] = data['places']
             
+        elif 'itinerary' in data:
+            # Itinerary/complete trip responses
+            normalized['type'] = 'itinerary'
+            normalized['itinerary'] = data['itinerary']
+            # Preserve any additional itinerary context if present
+            for key in ['segments', 'flights', 'hotels', 'activities', 'trip']:
+                if key in data and key not in normalized:
+                    normalized[key] = data[key]
+            
         elif 'booking' in data:
             normalized['type'] = 'booking'
             normalized['booking'] = data['booking']
