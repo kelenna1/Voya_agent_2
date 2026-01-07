@@ -178,7 +178,7 @@ class FlightBooking(models.Model):
         ]
     
     def __str__(self):
-        return f"{self.origin} → {self.destination} ({self.pnr or self.mistifly_order_id})"
+        return f"{self.origin} -> {self.destination} ({self.pnr or self.mistifly_order_id})"
     
     def save(self, *args, **kwargs):
         """Auto-set expiration time if not set"""

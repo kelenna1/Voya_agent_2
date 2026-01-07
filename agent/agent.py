@@ -47,13 +47,13 @@ def normalize_future_date(date_str: str) -> str:
             parsed = parsed.replace(year=parsed.year + 1)
 
         normalized = parsed.strftime("%Y-%m-%d")
-        print(f"[Date Normalized] {date_str} → {normalized}")  # Debug line
+        print(f"[Date Normalized] {date_str} -> {normalized}")  # Debug line
         return normalized
 
     except Exception as e:
         # Fail safe: default to 7 days from now
         fallback = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
-        print(f"[Date Normalize Failed] {date_str} → {fallback} (error: {e})")
+        print(f"[Date Normalize Failed] {date_str} -> {fallback} (error: {e})")
         return fallback
 
 

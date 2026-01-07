@@ -9,6 +9,91 @@ from datetime import datetime
 from typing import Dict, Optional, List
 
 
+
+@classmethod
+def classify(cls, query: str) -> Dict:
+    query_lower = query.lower().strip()
+    
+    # ✅ IMPROVED: Only classify as greeting if there's NO search intent
+    # Check for search intent FIRST
+    flight_score = cls._score_patterns(query_lower, cls.FLIGHT_PATTERNS)
+    tour_score = cls._score_patterns(query_lower, cls.TOUR_PATTERNS)
+    place_score = cls._score_patterns(query_lower, cls.PLACE_PATTERNS)
+    
+    has_search_intent = (flight_score + tour_score + place_score) > 0
+    
+    # Only classify as pure greeting if NO search intent
+    if not has_search_intent and cls._is_greeting_or_conversational(query_lower):
+        return {
+            'type': 'unknown',
+            'confidence': 0.0,
+            'params': {},
+            'use_agent': True,
+            'reason': 'Pure greeting - no search intent'
+        }
+
+    if cls._is_complex_query(query_lower):
+        return {
+            'type': 'complex',
+            'confidence': 0.9,
+            'params': {},
+            'use_agent': True,
+            'reason': 'Multi-step reasoning required'
+        }
+
+    scores = {
+        'flight': flight_score,
+        'tour': tour_score,
+        'place': place_score
+    }
+
+    max_type = max(scores, key=scores.get)
+    max_score = scores[max_type]
+
+    # ✅ FIX: Ensure zero-score queries always return 'unknown' and use agent
+    if max_score < 1:
+        return {
+            'type': 'unknown',
+            'confidence': 0.0,
+            'params': {},
+            'use_agent': True,
+            'reason': 'Query type unclear - no matching patterns found'
+        }
+
+    if max_type == 'flight':
+        params = cls._extract_flight_params(query_lower)
+        pattern_len = len(cls.FLIGHT_PATTERNS)
+    elif max_type == 'tour':
+        params = cls._extract_tour_params(query_lower)
+        pattern_len = len(cls.TOUR_PATTERNS)
+    else:
+        params = cls._extract_place_params(query_lower)
+        pattern_len = len(cls.PLACE_PATTERNS)
+
+    required_params = cls._get_required_params(max_type)
+    missing = [p for p in required_params if not params.get(p)]
+
+    confidence = max_score / pattern_len
+
+    # ✅ FIX: If extraction failed or looks wrong, use agent
+    if missing or cls._params_look_invalid(params, max_type):
+        return {
+            'type': max_type,
+            'confidence': confidence,
+            'params': params,
+            'use_agent': True,  # Let agent handle it
+            'reason': f'Params unclear or missing: {missing}'
+        }
+
+    return {
+        'type': max_type,
+        'confidence': confidence,
+        'params': params,
+        'use_agent': False,
+        'reason': 'All required params extracted'
+    }
+
+
 class QueryClassifier:
     """Classify user queries without using LLM"""
 
@@ -31,17 +116,20 @@ class QueryClassifier:
     ]
 
     TOUR_PATTERNS = [
-        r'\b(tour|tours|activity|activities|excursion|sightseeing)\b',
-        r'\b(things to do|what to do|attractions|visit)\b',
-        r'\b(museum|castle|palace|temple|church|monument)\b',
-        r'\b(experience|adventure|safari|cruise)\b'
+        r'\b(tour|tours|activity|activities|excursion|sightseeing|guide)\b',
+        r'\b(things to do|what to do|attractions|visit|explore|experience)\b',
+        r'\b(museum|castle|palace|temple|church|monument|park|safari|cruise)\b',
+        r'\b(ticket|entry).*(museum|park|zoo)\b'
     ]
 
     PLACE_PATTERNS = [
-        r'\b(hotel|hotels|accommodation|stay|resort|hostel)\b',
-        r'\b(restaurant|restaurants|cafe|bar|dining|eat|food)\b',
-        r'\b(near|close to|around)\b',
-        r'\b(5[- ]?star|luxury|budget|cheap)\b'
+        r'\b(hotel|hotels|accommodation|stay|resort|hostel|inn|lodge)\b',
+        r'\b(restaurant|restaurants|cafe|bar|dining|eat|food|dinner|lunch|breakfast)\b',
+        r'\b(place|places|spot|spots|location|locations|area|venue)\b', # Generic terms
+        r'\b(find|search|show|looking for|where is)\b.*(in|at|near|around)\b', # Intent + Preposition
+        r'\b(near|close to|nearby)\b',
+        r'\b(mall|cinema|club|lounge|beach|spa|gym|market|shop|store)\b'
+
     ]
 
     COMPLEX_INDICATORS = [
@@ -78,13 +166,15 @@ class QueryClassifier:
         max_type = max(scores, key=scores.get)
         max_score = scores[max_type]
 
+        # ✅ FIX: Ensure zero-score queries always return 'unknown' and use agent
+        # This prevents conversational queries from being misclassified
         if max_score < 1:
             return {
                 'type': 'unknown',
                 'confidence': 0.0,
                 'params': {},
                 'use_agent': True,
-                'reason': 'Query type unclear'
+                'reason': 'Query type unclear - no matching patterns found'
             }
 
         if max_type == 'flight':
@@ -137,6 +227,27 @@ class QueryClassifier:
             dest = params.get('destination')
             # If either is missing or invalid
             if not origin or not dest or len(origin) != 3 or len(dest) != 3:
+                return True
+        
+        elif query_type == 'place':
+            # ✅ FIX: Validate that place query isn't just conversational text
+            query = params.get('query', '')
+            if not query or len(query) < 3:
+                return True
+            
+            # Check if query looks like conversational text (greetings, casual chat)
+            conversational_indicators = [
+                r'\b(hey|hi|hello|what\'?s up|how are you|thanks|thank you)\b',
+                r'\b(yeah|yes|no|ok|okay|sure|alright)\b',
+                r'^\s*(hey|hi|hello|what\'?s|how)\s+',
+            ]
+            if any(re.search(pattern, query.lower()) for pattern in conversational_indicators):
+                return True
+            
+            # Check if query is too generic (just common words)
+            generic_words = ['the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being']
+            words = query.lower().split()
+            if len(words) <= 3 and all(word in generic_words or len(word) <= 2 for word in words):
                 return True
         
         return False

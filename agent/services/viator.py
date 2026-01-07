@@ -174,7 +174,7 @@ class ViatorService:
         
         # Cache the resolved ID for 24 hours
         self.api_cache.set(cache_key, dest_id, timeout=self.CACHE_TTL_DESTINATIONS)
-        logger.info(f"[Viator] Resolved '{name}' → ID {dest_id}")
+        logger.info(f"[Viator] Resolved '{name}' -> ID {dest_id}")
         return dest_id
 
     # ================================================================

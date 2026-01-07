@@ -2,7 +2,9 @@
 from django.shortcuts import render
 from django.utils import timezone
 from django.db import transaction
-from .agent import executor, create_executor_with_memory
+from .agent import executor, create_executor_with_memory, agent, tools
+from langchain.memory import ConversationBufferWindowMemory
+from langchain.agents import AgentExecutor
 from .models import Conversation, Message, Tour
 from .services.memory import ConversationSearchService
 from .serializers import (
@@ -15,6 +17,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView
+from agent.utils.output_parser import parse_agent_output
 import uuid
 import json
 import time
@@ -24,6 +27,7 @@ from .utils.classifier import QueryClassifier
 import logging
 logger = logging.getLogger(__name__)
 from .handlers import get_handlers
+import re
 
 
 class ChatView(APIView):
@@ -46,22 +50,23 @@ class ChatView(APIView):
             session_id = serializer.validated_data.get('session_id') or str(uuid.uuid4())
             
             # ================================================================
+            # LAYER 2: QUERY CLASSIFICATION (Smart routing) - DO THIS FIRST
+            # ================================================================
+            classification = QueryClassifier.classify(user_input)
+            
+            # ================================================================
             # LAYER 1: VIEW-LEVEL CACHE (Fastest - ~5-20ms)
             # ================================================================
-            cache_key = self._build_cache_key(session_id, user_input)
+            # ✅ FIX: Build cache key with classification to prevent type mismatches
+            cache_key = self._build_cache_key(session_id, user_input, classification)
             cached_response = cache.get(cache_key)
             
             if cached_response:
                 duration = time.time() - start_time
-                logger.info(f"[CACHE HIT] View-level cache hit! Duration: {duration*1000:.0f}ms")
+                logger.info(f"[CACHE HIT] View-level cache hit! Duration: {duration*1000:.0f}ms, Key: {cache_key[:50]}...")
                 cached_response['cached'] = True
                 cached_response['duration_ms'] = int(duration * 1000)
                 return Response(cached_response, status=status.HTTP_200_OK)
-            
-            # ================================================================
-            # LAYER 2: QUERY CLASSIFICATION (Smart routing)
-            # ================================================================
-            classification = QueryClassifier.classify(user_input)
             logger.info(f"[CLASSIFIER] Type: {classification['type']}, Use Agent: {classification['use_agent']}, Confidence: {classification['confidence']:.2f}")
             
             # Get or create conversation
@@ -87,7 +92,8 @@ class ChatView(APIView):
                 response_data = self._handle_with_agent(
                     session_id, 
                     user_input, 
-                    conversation
+                    conversation,
+                    classification
                 )
             else:
                 # Simple query - use direct handler (FAST PATH)
@@ -120,7 +126,6 @@ class ChatView(APIView):
             response_data['cached'] = False
             response_data['handler'] = 'agent' if classification['use_agent'] else 'direct'
             
-            # If the underlying handler/agent didn't set a `type`, infer it
             if 'type' not in response_data:
                 q_type = classification.get('type')
                 if q_type == 'flight':
@@ -133,8 +138,33 @@ class ChatView(APIView):
                     # Fallback for generic/unknown queries
                     response_data['type'] = 'conversational'
             
-            # Cache response for 5 minutes
-            cache.set(cache_key, response_data, timeout=300)
+            # ================================================================
+            # CACHE ONLY SUCCESSFUL RESPONSES WITH VALIDATION
+            # ================================================================
+            # Only cache successful responses to prevent caching errors
+            # Also validate that response type matches query classification
+            should_cache = response_data.get('success', True) is True
+            
+            # ✅ FIX: Don't cache if response type doesn't match query intent
+            if classification:
+                query_type = classification.get('type', '')
+                response_type = response_data.get('type', '')
+                
+                # If query was 'unknown' but response is a search type, don't cache
+                if query_type == 'unknown' and response_type in ['flight_search', 'tour_search', 'place_search']:
+                    should_cache = False
+                    logger.warning(f"[CACHE] Skipping cache - type mismatch: query='{query_type}' vs response='{response_type}'")
+            
+            if should_cache:
+                cache.set(cache_key, response_data, timeout=300)
+                logger.info(f"[CACHE] Cached successful response (type: {response_data.get('type', 'unknown')})")
+            else:
+                # Cache errors for only 10 seconds to handle transient issues
+                if not response_data.get('success', True):
+                    cache.set(cache_key, response_data, timeout=10)
+                    logger.warning(f"[CACHE] Cached error response for 10s only (success=False)")
+                else:
+                    logger.info(f"[CACHE] Skipped caching due to validation")
             
             logger.info(f"[PERF] Total duration: {duration*1000:.0f}ms, Type: {classification['type']}, Handler: {response_data['handler']}")
             
@@ -150,11 +180,20 @@ class ChatView(APIView):
                 "duration_ms": int(duration * 1000)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
-    def _build_cache_key(self, session_id: str, user_input: str) -> str:
+    def _build_cache_key(self, session_id: str, user_input: str, classification: dict = None) -> str:
         """Build cache key for view-level caching"""
         # Include session for context-aware caching
         # Hash the input to keep key short
-        input_hash = hashlib.md5(user_input.lower().strip().encode()).hexdigest()
+        # ✅ FIX: Include classification type in cache key to prevent type mismatches
+        input_normalized = user_input.lower().strip()
+        input_hash = hashlib.md5(input_normalized.encode()).hexdigest()
+        
+        # Include classification type if available to prevent cache collisions
+        # between different query types with similar text
+        if classification:
+            query_type = classification.get('type', 'unknown')
+            return f"chat_response:{session_id}:{query_type}:{input_hash}"
+        
         return f"chat_response:{session_id}:{input_hash}"
     
 
@@ -174,10 +213,13 @@ class ChatView(APIView):
             else:
                 # Unknown type - use agent
                 logger.warning(f"[Direct Handler] Unknown type '{query_type}' - using agent")
+                user_message = conversation.messages.filter(message_type='user').last()
+                original_query = user_message.content if user_message else ""
                 return self._handle_with_agent(
                     conversation.session_id,
-                    conversation.messages.last().content if conversation.messages.exists() else "",
-                    conversation
+                    original_query,
+                    conversation,
+                    classification  # Pass the classification we already have
                 )
             
             # ✅ CHECK FOR FALLBACK FLAG
@@ -190,7 +232,8 @@ class ChatView(APIView):
                 return self._handle_with_agent(
                     conversation.session_id,
                     original_query,
-                    conversation
+                    conversation,
+                    classification  # Pass the classification we already have
                 )
             
             return result
@@ -203,61 +246,80 @@ class ChatView(APIView):
             return self._handle_with_agent(
                 conversation.session_id,
                 original_query,
-                conversation
+                conversation,
+                classification  # Pass the classification we already have
             )
         
-    def _handle_with_agent(self, session_id: str, user_input: str, conversation) -> dict:
+    def _handle_with_agent(self, session_id: str, user_input: str, conversation, classification: dict = None) -> dict:
         """Handle complex queries with LangChain agent"""
-        # Create executor with REDUCED memory (5 instead of 20)
-        session_executor = create_executor_with_memory(session_id)
+        #  FIX: For PURELY conversational queries (greetings only), don't use conversation memory
+        use_memory = True
+        is_pure_greeting = False
+        
+        if classification:
+            query_type = classification.get('type', '')
+            confidence = classification.get('confidence', 1.0)
+            
+            # Check if this is a PURE greeting (no search intent)
+            # Examples: "hey", "hi", "thanks" - these should not use memory
+            # Counter-examples: "hey find me restaurants" - these SHOULD use memory
+            if query_type == 'unknown' and confidence < 0.5:
+                # Check if user_input is PURELY greeting (very short, no search keywords)
+                user_input_lower = user_input.lower().strip()
+                
+                # List of pure greeting patterns
+                pure_greetings = [
+                    r'^\s*(hey+|hi+|hello+|howdy|sup|yo)\s*$',
+                    r'^\s*(thanks?|thank you|thx)\s*$',
+                    r'^\s*(ok|okay|sure|alright|cool)\s*$',
+                    r'^\s*(yes|yeah|yep|nope|no)\s*$',
+                ]
+                
+                is_pure_greeting = any(re.search(pattern, user_input_lower, re.IGNORECASE) for pattern in pure_greetings)
+                
+                if is_pure_greeting:
+                    use_memory = False
+                    logger.info(f"[AGENT] Pure greeting detected, disabling memory: '{user_input[:50]}'")
+        
+        # Create executor with or without memory based on query type
+        if use_memory:
+            session_executor = create_executor_with_memory(session_id)
+        else:
+            # Create executor without memory for fresh context
+            memory = ConversationBufferWindowMemory(memory_key="chat_history", return_messages=True, k=0)
+            session_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, memory=memory)
         
         # Invoke agent
         result = session_executor.invoke({"input": user_input})
         ai_response = result.get("output", "Sorry, I couldn't process that.")
         
-        # Check if response contains structured data
-        structured_response = self._extract_structured_response(ai_response)
+        logger.info(f"[AGENT] Raw response: {ai_response[:200]}...")
         
-        if structured_response:
-            return structured_response
-        else:
-            return {
-                'output': ai_response,
-                'success': True,
-                'type': 'conversational'
-            }
+        #  USE THE NEW PARSER
+        structured_response = parse_agent_output(ai_response)
+        
+        logger.info(f"[AGENT] Parsed response type: {structured_response.get('type')}, success: {structured_response.get('success')}")
+        
+        # FIX: ONLY override if this was a PURE greeting (no search intent)
+        # If query had search intent (like "hey find me restaurants"), DON'T override
+        if is_pure_greeting and classification and classification.get('type') == 'unknown':
+            response_type = structured_response.get('type', '')
+            # Only override if agent returned a search type for a PURE greeting
+            if response_type in ['flight_search', 'tour_search', 'place_search']:
+                logger.warning(f"[AGENT] Pure greeting got search response '{response_type}'. Overriding to conversational.")
+                structured_response['type'] = 'conversational'
+                # Remove search-specific fields
+                for field in ['flights', 'tours', 'places']:
+                    if field in structured_response:
+                        del structured_response[field]
+                # Keep the message if it exists, otherwise use output
+                if 'output' not in structured_response and 'message' in structured_response:
+                    structured_response['output'] = structured_response['message']
+        
+        return structured_response
+
+
     
-    def _extract_structured_response(self, ai_response: str):
-        """Extract structured JSON from AI response if present"""
-        result_types = [
-            "TOUR_SEARCH_RESULT:",
-            "PLACES_SEARCH_RESULT:",
-            "PLACE_DETAILS_RESULT:",
-            "FLIGHT_SEARCH_RESULT:",
-            "FLIGHT_PRICE_RESULT:",
-            "FLIGHT_BOOKING_RESULT:",
-            "AVAILABILITY_RESULT:",
-            "DESTINATION_INFO_RESULT:",
-            "COMPLETE_TRIP_RESULT:"
-        ]
-        
-        for result_type in result_types:
-            if result_type in ai_response:
-                try:
-                    json_start = ai_response.find(result_type) + len(result_type)
-                    json_part = ai_response[json_start:].strip()
-                    return json.loads(json_part)
-                except json.JSONDecodeError:
-                    continue
-        
-        # Check if response is pure JSON
-        if ai_response.strip().startswith('{'):
-            try:
-                return json.loads(ai_response)
-            except json.JSONDecodeError:
-                pass
-        
-        return None
     
     def _format_error_message(self, error_str: str) -> str:
         """Format error messages for user display"""
